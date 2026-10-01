@@ -8,9 +8,7 @@ import {
   SEA_LEVEL_MIN,
 } from './constants.js';
 import { DIRS } from './constants.js';
-import { State, Globals } from './state.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
+import { State, Globals, H1, H2, H3, H4 } from './state.js';
 
 // ---------- Priority-flood spill levels ----------
 // For every cell, the minimum water height that would make water spill

@@ -9,10 +9,7 @@ import {
   K_RIVER_ERODE, K_DRAIN_ROUTING,
 } from './constants.js';
 import { smoothstep } from './constants.js';
-import { State, Globals } from './state.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
-const H1t = State.H1t, H2t = State.H2t, H3t = State.H3t, H4t = State.H4t;
+import { State, Globals, H1, H2, H3, H4, H1t, H2t, H3t, H4t } from './state.js';
 
 // Move sediment between a pair of cells until both sit within TALUS[i] of each other,
 // layer-by-layer from soft soil down to hard rock. Also diffuse H1 between neighbours.

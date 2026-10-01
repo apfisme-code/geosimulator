@@ -8,9 +8,7 @@ import {
   SNOW_COMPACT_RATE, SNOW_TO_ICE_RATIO,
   MELT_TO_W, MELT_TO_AQ, AQ_MAX, smoothstep,
 } from './constants.js';
-import { State, Globals } from './state.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
+import { State, Globals, H1, H2, H3, H4 } from './state.js';
 
 // One combined step covering sea-ice growth/melt, snow accumulation/melt,
 // snow→ice compaction and meltwater routing.

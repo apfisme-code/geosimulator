@@ -9,7 +9,7 @@ import {
   renderer, scene, camera,
   syncTextures, positionTiles,
 } from './render.js';
-import { tickPlayer, setFeetY, player } from './player.js';
+import { tickPlayer, player } from './player.js';
 import { renderSlice, renderGraphs, updateHUD, periodicUI } from './ui.js';
 
 // ---------- Fatal-error overlay so failures don't show up as a blank screen ----------
@@ -30,7 +30,7 @@ const MAX_SUBSTEPS = 5;
 
 try {
   resetTerrain(false);
-  setFeetY(sampleHeight(player.x, player.z));
+  Globals.feetY = sampleHeight(player.x, player.z);
   syncTextures();
 } catch (e) {
   showError('init', e);

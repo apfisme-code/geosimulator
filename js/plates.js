@@ -18,97 +18,88 @@ import {
 import { State, Globals } from './state.js';
 import { vnoise4, fbmTorus } from './noise.js';
 
-// Per-plate state lives directly on State (see state.js); the
-// `plates` alias keeps the rest of this file readable.
-const plates = State;
-
 // ---------- Initialisation ----------
 export function initPlates() {
-  const p = plates;
   for (let k = 0; k < PLATE_COUNT; k++) spawnRandomPlate(k);
 }
 
 function spawnRandomPlate(slot) {
-  const p = plates;
-  p.plateCX[slot] = Math.random() * L;
-  p.plateCZ[slot] = Math.random() * L;
+  State.plateCX[slot] = Math.random() * L;
+  State.plateCZ[slot] = Math.random() * L;
   const isOcean = Math.random() < OCEAN_FRACTION;
   if (isOcean) {
-    p.plateType[slot]  = 0;
-    p.plateH[slot]     = OCEAN_TARGET_MIN + Math.random() * (OCEAN_TARGET_MAX - OCEAN_TARGET_MIN);
-    p.plateHills[slot] = Math.random() * 0.15;
+    State.plateType[slot]  = 0;
+    State.plateH[slot]     = OCEAN_TARGET_MIN + Math.random() * (OCEAN_TARGET_MAX - OCEAN_TARGET_MIN);
+    State.plateHills[slot] = Math.random() * 0.15;
   } else {
-    p.plateType[slot]  = 1;
+    State.plateType[slot]  = 1;
     const hills = Math.random();
-    p.plateHills[slot] = hills;
-    p.plateH[slot]     = CONT_TARGET_MIN + hills * (CONT_TARGET_MAX - CONT_TARGET_MIN);
+    State.plateHills[slot] = hills;
+    State.plateH[slot]     = CONT_TARGET_MIN + hills * (CONT_TARGET_MAX - CONT_TARGET_MIN);
   }
   const ang = Math.random() * TAU;
   const spd = 0.05 + Math.random() * 0.15;
-  p.plateDriftVX[slot] = Math.cos(ang) * spd;
-  p.plateDriftVZ[slot] = Math.sin(ang) * spd;
-  p.plateActive[slot]  = 1;
+  State.plateDriftVX[slot] = Math.cos(ang) * spd;
+  State.plateDriftVZ[slot] = Math.sin(ang) * spd;
+  State.plateActive[slot]  = 1;
 }
 
 function deactivatePlate(k) {
-  plates.plateActive[k] = 0;
+  State.plateActive[k] = 0;
 }
 
 export function countActivePlates() {
-  const p = plates;
   let c = 0;
-  for (let k = 0; k < MAX_PLATES; k++) if (p.plateActive[k]) c++;
+  for (let k = 0; k < MAX_PLATES; k++) if (State.plateActive[k]) c++;
   return c;
 }
 
 // Drift all plates by their velocity for `dts` simulated seconds.
 export function driftPlates(dts) {
-  const p = plates;
   for (let k = 0; k < MAX_PLATES; k++) {
-    if (!p.plateActive[k]) continue;
-    p.plateCX[k] = wrap(p.plateCX[k] + p.plateDriftVX[k] * dts);
-    p.plateCZ[k] = wrap(p.plateCZ[k] + p.plateDriftVZ[k] * dts);
+    if (!State.plateActive[k]) continue;
+    State.plateCX[k] = wrap(State.plateCX[k] + State.plateDriftVX[k] * dts);
+    State.plateCZ[k] = wrap(State.plateCZ[k] + State.plateDriftVZ[k] * dts);
   }
 }
 
 // Per-step: deactivate tiny plates, occasionally split big ones.
 export function updatePlateLifecycle() {
-  const p = plates;
-  p.plateArea.fill(0);
+  State.plateArea.fill(0);
   for (let k = 0; k < N * N; k++) {
-    const k1 = p.plateK1[k];
-    if (k1 >= 0 && p.plateActive[k1]) p.plateArea[k1]++;
+    const k1 = State.plateK1[k];
+    if (k1 >= 0 && State.plateActive[k1]) State.plateArea[k1]++;
   }
   for (let k = 0; k < MAX_PLATES; k++) {
-    if (p.plateActive[k] && p.plateArea[k] < MIN_PLATE_AREA) deactivatePlate(k);
+    if (State.plateActive[k] && State.plateArea[k] < MIN_PLATE_AREA) deactivatePlate(k);
   }
   for (let k = 0; k < MAX_PLATES; k++) {
-    if (!p.plateActive[k]) continue;
-    if (p.plateArea[k] < SPLIT_AREA_MIN) continue;
+    if (!State.plateActive[k]) continue;
+    if (State.plateArea[k] < SPLIT_AREA_MIN) continue;
     if (Math.random() > SPLIT_PROB) continue;
     let bestIdx = -1, bestM = SPLIT_MANTLE_MIN;
     for (let kk = 0; kk < N * N; kk++) {
-      if (p.plateK1[kk] !== k) continue;
+      if (State.plateK1[kk] !== k) continue;
       if (State.mantleField[kk] > bestM) { bestM = State.mantleField[kk]; bestIdx = kk; }
     }
     if (bestIdx < 0) continue;
     let slot = -1;
-    for (let s = 0; s < MAX_PLATES; s++) if (!p.plateActive[s]) { slot = s; break; }
+    for (let s = 0; s < MAX_PLATES; s++) if (!State.plateActive[s]) { slot = s; break; }
     if (slot < 0) continue;
     const x = (bestIdx % N) * cellSize;
     const z = ((bestIdx / N) | 0) * cellSize;
     const offAng  = Math.random() * TAU;
     const offDist = SPLIT_OFFSET_MIN + Math.random() * (SPLIT_OFFSET_MAX - SPLIT_OFFSET_MIN);
-    p.plateCX[slot]      = wrap(x + Math.cos(offAng) * offDist);
-    p.plateCZ[slot]      = wrap(z + Math.sin(offAng) * offDist);
-    p.plateH[slot]       = p.plateH[k];
-    p.plateType[slot]    = p.plateType[k];
-    p.plateHills[slot]   = p.plateHills[k];
+    State.plateCX[slot]      = wrap(x + Math.cos(offAng) * offDist);
+    State.plateCZ[slot]      = wrap(z + Math.sin(offAng) * offDist);
+    State.plateH[slot]       = State.plateH[k];
+    State.plateType[slot]    = State.plateType[k];
+    State.plateHills[slot]   = State.plateHills[k];
     const pAng = Math.random() * TAU;
     const pSpd = 0.03 + Math.random() * 0.06;
-    p.plateDriftVX[slot] = p.plateDriftVX[k] + Math.cos(pAng) * pSpd;
-    p.plateDriftVZ[slot] = p.plateDriftVZ[k] + Math.sin(pAng) * pSpd;
-    p.plateActive[slot]  = 1;
+    State.plateDriftVX[slot] = State.plateDriftVX[k] + Math.cos(pAng) * pSpd;
+    State.plateDriftVZ[slot] = State.plateDriftVZ[k] + Math.sin(pAng) * pSpd;
+    State.plateActive[slot]  = 1;
     computeWorleyFields();
     break;
   }
@@ -119,7 +110,6 @@ export function updatePlateLifecycle() {
 // distances, and per-plate fields. Then assemble `targetSurface` from
 // plate heights, boundary effects, and detail noise.
 export function computeWorleyFields() {
-  const p = plates;
   const K1 = State.plateK1, K2 = State.plateK2;
   const F1 = State.plateF1, F2 = State.plateF2;
   const HA = State.plateH_A, HB = State.plateH_B;
@@ -131,8 +121,8 @@ export function computeWorleyFields() {
       const x = i * cellSize, z = j * cellSize;
       let b1 = Infinity, b2 = Infinity, k1 = -1, k2 = -1;
       for (let k = 0; k < MAX_PLATES; k++) {
-        if (!p.plateActive[k]) continue;
-        const dx = wrapRel(p.plateCX[k] - x), dz = wrapRel(p.plateCZ[k] - z);
+        if (!State.plateActive[k]) continue;
+        const dx = wrapRel(State.plateCX[k] - x), dz = wrapRel(State.plateCZ[k] - z);
         const d2 = dx * dx + dz * dz;
         if (d2 < b1)      { b2 = b1; k2 = k1; b1 = d2; k1 = k; }
         else if (d2 < b2) { b2 = d2; k2 = k; }
@@ -150,12 +140,12 @@ export function computeWorleyFields() {
       F2[idx]  = Math.sqrt(Math.max(b2, 0));
       K1[idx]  = k1;
       K2[idx]  = k2 < 0 ? k1 : k2;
-      HA[idx]  = p.plateH[k1];
-      HB[idx]  = p.plateH[K2[idx]];
-      TA[idx]  = p.plateType[k1];
-      TB[idx]  = p.plateType[K2[idx]];
-      HiA[idx] = p.plateHills[k1];
-      HiB[idx] = p.plateHills[K2[idx]];
+      HA[idx]  = State.plateH[k1];
+      HB[idx]  = State.plateH[K2[idx]];
+      TA[idx]  = State.plateType[k1];
+      TB[idx]  = State.plateType[K2[idx]];
+      HiA[idx] = State.plateHills[k1];
+      HiB[idx] = State.plateHills[K2[idx]];
     }
   }
 
@@ -171,12 +161,12 @@ export function computeWorleyFields() {
     const hA = HA[k], hB = HB[k];
     const hBlend = wA * hA + (1 - wA) * hB;
 
-    const dx = wrapRel(p.plateCX[k2] - p.plateCX[k1]);
-    const dz = wrapRel(p.plateCZ[k2] - p.plateCZ[k1]);
+    const dx = wrapRel(State.plateCX[k2] - State.plateCX[k1]);
+    const dz = wrapRel(State.plateCZ[k2] - State.plateCZ[k1]);
     const dNorm = Math.hypot(dx, dz) || 1;
     const nx = dx / dNorm, nz = dz / dNorm;
-    const vRelX = p.plateDriftVX[k2] - p.plateDriftVX[k1];
-    const vRelZ = p.plateDriftVZ[k2] - p.plateDriftVZ[k1];
+    const vRelX = State.plateDriftVX[k2] - State.plateDriftVX[k1];
+    const vRelZ = State.plateDriftVZ[k2] - State.plateDriftVZ[k1];
     const vn = vRelX * nx + vRelZ * nz;
     const vnNorm = Math.max(-1, Math.min(1, vn / PLATE_VN_SCALE));
 

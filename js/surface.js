@@ -5,10 +5,8 @@ import {
   N, L, cellSize, AQ_MAX,
   ICE_FREEBORD_RATIO,
 } from './constants.js';
-import { State, Globals } from './state.js';
+import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { fbmTorus } from './noise.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
 
 // Soil: thinner underwater, modulated by FBM noise.
 export function initSoil(idx) {

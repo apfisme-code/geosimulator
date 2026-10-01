@@ -3,10 +3,8 @@
 
 import { N, cellSize, WIND_SPEED, WIND_CAP_BASE, WIND_CAP_SLOPE,
          K_WIND_ERODE, K_WIND_DEPOSIT, MAX_WIND_ERODE } from './constants.js';
-import { State, Globals } from './state.js';
+import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { windDirX, windDirZ } from './climate.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
 
 // Semi-Lagrangian advection with CFL sub-stepping when wind is large.
 export function windAdvect(dt) {

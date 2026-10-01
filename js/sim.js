@@ -7,7 +7,7 @@ import {
   DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL, CLIMATE_INTERVAL,
   AQ_FLOW_INTERVAL, AQ_MAX, L, BLEND_WIDTH,
 } from './constants.js';
-import { State, Globals, resetCounters } from './state.js';
+import { State, Globals, resetCounters, H1, H2, H3, H4 } from './state.js';
 import { bilinearWrap } from './utils.js';
 import {
   initPlates, computeWorleyFields, driftPlates,
@@ -23,8 +23,6 @@ import { lithify, initSoil, initGravel, initSoftRock, clampSafety } from './surf
 import { initPlumes, tickVolcanoes } from './volcano.js';
 import { windAdvect, windErodeDeposit, dropWindSed } from './wind.js';
 import { glacierStep } from './ice.js';
-
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
 
 // ---------- Advection of layer heights along plate drift ----------
 function advectLayers(dtAdv) {

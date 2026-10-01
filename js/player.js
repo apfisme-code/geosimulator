@@ -13,10 +13,6 @@ export const player = Globals.player;
 
 export const keys = Object.create(null);
 
-let feetY = 0;
-export function setFeetY(v) { feetY = v; }
-export function getFeetY() { return feetY; }
-
 // ---------- Global key bindings ----------
 addEventListener('keydown', e => {
   keys[e.code] = true;
@@ -84,10 +80,9 @@ export function tickPlayer(dt) {
 
   const groundY = sampleHeight(player.x, player.z);
   if (keys.Space && player.onGround) { player.onGround = false; player.vy = JUMP_V; }
-  if (player.onGround) feetY = groundY;
+  if (player.onGround) Globals.feetY = groundY;
   else {
-    player.vy -= GRAVITY * dt; feetY += player.vy * dt;
-    if (feetY <= groundY) { feetY = groundY; player.vy = 0; player.onGround = true; }
+    player.vy -= GRAVITY * dt; Globals.feetY += player.vy * dt;
+    if (Globals.feetY <= groundY) { Globals.feetY = groundY; player.vy = 0; player.onGround = true; }
   }
-  Globals.feetY = feetY;
 }

@@ -100,15 +100,10 @@ const histSea    = new Float32Array(HIST_LEN);
 const histPlates = new Float32Array(HIST_LEN);
 const histAq     = new Float32Array(HIST_LEN);
 
-// ---------- Plates accessor (kept for backwards-compat — no-op now) ----------
-export function allocatePlateArrays() {
-  return {
-    plateCX, plateCZ, plateH, plateType, plateHills,
-    plateDriftVX, plateDriftVZ, plateActive, plateArea,
-  };
-}
-
-// Public state object — everything is mutable in place.
+// ---------- Public state object — everything is mutable in place. ----------
+// Consumers can either read through `State.X` for grouped access or pull
+// individual arrays via the named exports at the bottom of this file
+// (those exist so hot loops don't have to write `State.H1` everywhere).
 export const State = {
   // terrain
   H1, H2, H3, H4, H1t, H2t, H3t, H4t,
@@ -140,6 +135,30 @@ export const State = {
   plateHillsA, plateHillsB,
   targetSurface,
   // history
+  histLand, histSnow, histIce, histSea, histPlates, histAq,
+};
+
+// Named exports for the fields used in hot loops — avoids the
+// `const H1 = State.H1` boilerplate in every consuming module.
+export {
+  H1, H2, H3, H4, H1t, H2t, H3t, H4t,
+  W, Sed, Wtmp, Sedtmp, Fmag,
+  Aq, Aqtmp,
+  lavaBonus, lavaBonusT,
+  snowLayer, iceLayer,
+  windSed, windSedB,
+  eruptHeat, ashLayer,
+  flowDir, flowAccumRouting, spillLevel,
+  bucketHead, bucketNext, bucketData,
+  pfHeapIdx, pfHeapLev,
+  temperature, humidity, humDist, rainShadow, currentT, bfsQueue,
+  mantleField,
+  plateCX, plateCZ, plateH, plateType, plateHills,
+  plateDriftVX, plateDriftVZ, plateActive, plateArea,
+  plateF1, plateF2, plateK1, plateK2,
+  plateH_A, plateH_B, plateTypeA, plateTypeB,
+  plateHillsA, plateHillsB,
+  targetSurface,
   histLand, histSnow, histIce, histSea, histPlates, histAq,
 };
 

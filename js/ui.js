@@ -7,7 +7,7 @@ import {
 } from './constants.js';
 import { State, Globals } from './state.js';
 import { countActivePlates } from './plates.js';
-import { player, getFeetY } from './player.js';
+import { player } from './player.js';
 
 const sliceCanvas = document.getElementById('sliceCanvas');
 const sliceCtx = sliceCanvas.getContext('2d');
@@ -163,7 +163,7 @@ export function updateHUD() {
   const stats = Globals.stats;
   const overlayName = OVERLAY_NAMES[Globals.overlayMode] ?? '—';
   hud.textContent =
-    `x=${player.x.toFixed(1)}  z=${player.z.toFixed(1)}  y=${getFeetY().toFixed(2)}\n` +
+    `x=${player.x.toFixed(1)}  z=${player.z.toFixed(1)}  y=${Globals.feetY.toFixed(2)}\n` +
     `t=${Globals.simTime.toFixed(1)}с  ${Globals.paused ? 'ПАУЗА' : 'идёт'}  seed=${Globals.worldSeed}\n` +
     `биом: ${biomeAtPlayer()}  |  seaLevel=${Globals.seaLevel.toFixed(2)} м\n` +
     `плит: ${activePlates}/${MAX_PLATES}  рожд. ${Globals.birthsTotal}  смерт. ${Globals.deathsTotal}\n` +

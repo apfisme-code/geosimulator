@@ -11,11 +11,8 @@ import {
   SEA_LEVEL_MIN, SEA_LEVEL_MAX,
 } from './constants.js';
 import { DIRS } from './constants.js';
-import { State, Globals } from './state.js';
+import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { fbmTorus } from './noise.js';
-
-// Convenience accessors
-const H1 = State.H1, H2 = State.H2, H3 = State.H3, H4 = State.H4;
 
 // Wind direction at latitude j — pure function, exported for wind/ice modules too.
 export function windDirX(j) { return -Math.cos(4 * Math.PI * j / N); }
