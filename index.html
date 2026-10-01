@@ -1,0 +1,2354 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Тороидальный мир — Sed по руслам + лава</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0d15; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 12px; top: 12px; color: #cfe;
+    font: 13px/1.55 ui-monospace, monospace;
+    background: rgba(0,0,0,.5); padding: 10px 14px; border-radius: 6px;
+    pointer-events: none; white-space: pre; z-index: 5; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px;
+    background: #fff; border-radius: 50%; opacity: .85; pointer-events: none; z-index: 5; }
+  #sliceCanvas { position: fixed; left: 12px; bottom: 12px; width: 640px; height: 140px;
+    background: rgba(0,0,0,.72); border-radius: 6px; pointer-events: none;
+    display: none; z-index: 10; }
+  #graphCanvas { position: fixed; right: 12px; bottom: 12px; width: 360px; height: 200px;
+    background: rgba(0,0,0,.72); border-radius: 6px; pointer-events: none;
+    display: none; z-index: 10; }
+  #start { position: fixed; inset: 0; display: grid; place-items: center; cursor: pointer;
+    background: rgba(0,0,0,.72); color: #dfe; font: 20px/1.4 system-ui, sans-serif;
+    text-align: center; user-select: none; z-index: 20; }
+  #start small { display: block; margin-top: 12px; font-size: 14px; opacity: .78; line-height: 1.8 }
+  #start kbd { background: #222; border: 1px solid #555; border-radius: 3px;
+    padding: 1px 5px; font: 12px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="cross"></div>
+<canvas id="sliceCanvas" width="640" height="140"></canvas>
+<canvas id="graphCanvas" width="360" height="200"></canvas>
+<div id="start">Нажмите, чтобы играть
+  <small>
+    <kbd>WASD</kbd> движ · <kbd>Мышь</kbd> обзор · <kbd>Shift</kbd> бег · <kbd>Space</kbd> прыжок · <kbd>Esc</kbd> выход<br>
+    <kbd>P</kbd> пауза · <kbd>T</kbd> дождь · <kbd>B</kbd> ветер · <kbd>I</kbd> лёд · <kbd>V</kbd> вулканы<br>
+    <kbd>L</kbd> overlay · <kbd>X</kbd> разрез · <kbd>Y</kbd> графики · <kbd>R</kbd> рестарт · <kbd>G</kbd> новый мир
+  </small>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const L = 320, N = 128, cellSize = L / N, TAU = Math.PI * 2;
+const wrap    = v => v - Math.floor(v / L) * L;
+const wrapRel = v => v - L * Math.round(v / L);
+const smoothstep = (a, b, x) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+const SUBDIV = 8;
+const NV  = N * SUBDIV;
+const NV1 = NV + 1;
+
+let worldSeed = (Math.random() * 0x7fffffff) | 0;
+
+function hash4(x, y, z, w, seed) {
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263)
+        ^ Math.imul(z, 1274126177) ^ Math.imul(w, 2654435761)
+        ^ Math.imul(seed, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+function vnoise4(x, y, z, w, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), wi = Math.floor(w);
+  const xf = x - xi, yf = y - yi, zf = z - zi, wf = w - wi;
+  const u = fade(xf), v = fade(yf), s = fade(zf), t = fade(wf);
+  const H = (a,b,c,d) => hash4(a,b,c,d,seed);
+  const lp = (a,b,tt) => a + (b - a) * tt;
+  const c000=H(xi,yi,zi,wi),     c100=H(xi+1,yi,zi,wi);
+  const c010=H(xi,yi+1,zi,wi),   c110=H(xi+1,yi+1,zi,wi);
+  const c001=H(xi,yi,zi+1,wi),   c101=H(xi+1,yi,zi+1,wi);
+  const c011=H(xi,yi+1,zi+1,wi), c111=H(xi+1,yi+1,zi+1,wi);
+  const d000=H(xi,yi,zi,wi+1),   d100=H(xi+1,yi,zi,wi+1);
+  const d010=H(xi,yi+1,zi,wi+1), d110=H(xi+1,yi+1,zi,wi+1);
+  const d001=H(xi,yi,zi+1,wi+1), d101=H(xi+1,yi,zi+1,wi+1);
+  const d011=H(xi,yi+1,zi+1,wi+1),d111=H(xi+1,yi+1,zi+1,wi+1);
+  const x00=lp(c000,c100,u), x10=lp(c010,c110,u);
+  const x01=lp(c001,c101,u), x11=lp(c011,c111,u);
+  const y0 =lp(x00,x10,v),   y1 =lp(x01,x11,v);
+  const z0 =lp(y0,y1,s);
+  const X00=lp(d000,d100,u), X10=lp(d010,d110,u);
+  const X01=lp(d001,d101,u), X11=lp(d011,d111,u);
+  const Y0 =lp(X00,X10,v),   Y1 =lp(X01,X11,v);
+  const Z0 =lp(Y0,Y1,s);
+  return lp(z0,Z0,t) * 2 - 1;
+}
+function fbmTorus(x, z, oct, baseFreq, seed) {
+  const u = (x / L) * TAU, v = (z / L) * TAU;
+  const cu = Math.cos(u), su = Math.sin(u), cv = Math.cos(v), sv = Math.sin(v);
+  let amp = 1, sum = 0, norm = 0, f = baseFreq;
+  for (let o = 0; o < oct; o++) {
+    sum += amp * vnoise4(cu*f, su*f, cv*f, sv*f, seed + o*131);
+    norm += amp; amp *= 0.5; f *= 2;
+  }
+  return sum / norm;
+}
+
+const H1 = new Float32Array(N*N);
+const H2 = new Float32Array(N*N);
+const H3 = new Float32Array(N*N);
+const H4 = new Float32Array(N*N);
+const H1t = new Float32Array(N*N);
+const H2t = new Float32Array(N*N);
+const H3t = new Float32Array(N*N);
+const H4t = new Float32Array(N*N);
+
+const W      = new Float32Array(N*N);
+const Sed    = new Float32Array(N*N);
+const Wtmp   = new Float32Array(N*N);
+const Sedtmp = new Float32Array(N*N);
+const Fmag   = new Float32Array(N*N);
+
+const Aq     = new Float32Array(N*N);
+const Aqtmp  = new Float32Array(N*N);
+/* Лава — постоянная метка поверхности, не смывается и не даёт релаксации съесть конус */
+const lavaBonus  = new Float32Array(N*N);
+const lavaBonusT = new Float32Array(N*N);
+
+const snowLayer = new Float32Array(N*N);
+const iceLayer  = new Float32Array(N*N);
+
+const flowDir          = new Int8Array(N*N);
+const flowAccumRouting = new Float32Array(N*N);
+const spillLevel       = new Float32Array(N*N);
+const FILL_EPS         = 0.05;
+const FLOW_ROUTING_INTERVAL = 15;
+const K_DRAIN_ROUTING = 0.005;
+const NBUCKETS = 512;
+
+const ADVECT_INTERVAL = 5;
+
+const mantleField = new Float32Array(N*N);
+const MANTLE_RATE  = 0.03;
+const MANTLE_DRIFT = 0.04;
+
+let windSed  = new Float32Array(N*N);
+let windSedB = new Float32Array(N*N);
+
+const TALUS = [0.35, 0.90, 1.50, 2.60];
+
+const temperature = new Float32Array(N*N);
+const humidity    = new Float32Array(N*N);
+const humDist     = new Float32Array(N*N);
+const rainShadow  = new Float32Array(N*N);
+const currentT    = new Float32Array(N*N);
+const bfsQueue    = new Int32Array(N*N);
+
+const CLIMATE_INTERVAL = 30;
+const HUMIDITY_FALLOFF = 15;
+const TEMP_ALT_LAPSE   = 0.7;
+
+const SEASON_AMP    = 40;
+const SEASON_PERIOD = 300;
+const SEASON_RATE   = TAU / SEASON_PERIOD;
+
+const SNOW_TEMP   = 0.22;
+const ICE_TEMP    = 0.12;
+const MELT_BAND_T = 0.08;
+
+const SHADOW_STEPS  = 24;
+const SHADOW_K      = 14;
+
+const OCEAN_CURRENT_RANGE = 10;
+const COLD_CURRENT = -0.15;
+const WARM_CURRENT = +0.10;
+
+function windDirX(j) { return -Math.cos(4 * Math.PI * j / N); }
+function windDirZ(j) { return 0.25 * Math.sin(4 * Math.PI * j / N); }
+const WIND_SPEED = 3.0;
+
+let seaLevel = 0;
+let tRef = 0.5;
+const SEA_TEMP_GAIN = 100;
+const SEA_SMOOTH = 0.05;
+const T_REF_ALPHA = 0.001;
+const SEA_LEVEL_MIN = -25;
+const SEA_LEVEL_MAX = 8;
+
+const SNOW_MAX          = 3.0;
+const ICE_MAX_LAYER     = 4.0;
+const ICE_FORM_RATE     = 0.006;
+const ICE_MELT_RATE     = 0.010;
+const SNOW_COMPACT_RATE = 0.0005;
+const SNOW_TO_ICE_RATIO = 0.4;
+const ICE_FREEBORD_RATIO = 0.08;
+const ICE_ACCUM = 0.012, MELT_RATE = 0.020;
+
+const AQ_MAX        = 2.0;
+const INFIL_RATE    = 0.15;
+const BASEFLOW_RATE = 0.008;
+const MELT_TO_W     = 0.7;
+const MELT_TO_AQ    = 0.3;
+const AQ_FLOW       = 0.05;
+const AQ_FLOW_INTERVAL = 4;
+
+const K_RIVER_ERODE = 0.0015;
+
+const eruptHeat = new Float32Array(N*N);
+const ashLayer  = new Float32Array(N*N);
+
+let plumes = [];
+let volcanoesEnabled = true;
+
+const PLUME_COUNT       = 12;
+const PLUME_ERUPT_MIN   = 400;
+const PLUME_ERUPT_MAX   = 1200;
+
+const CRATER_SIG = 5;
+const CRATER_REACH = 15;
+const LAVA_VOLUME = 3.0;
+const HEAT_RADIUS = 6;
+const HEAT_AMOUNT = 0.5;
+const HEAT_DECAY  = 0.998;
+const ASH_SIG = 12;
+const ASH_VOLUME = 0.35;
+const ASH_LAYER_MAX = 2.0;
+
+const PLATEAU_MAX = 10;
+const PLATEAU_OFFSET = 40;
+const PLATEAU_SIG = 22;
+
+let lastEruption = { i: -1, j: -1, t: -1e9, underwater: false };
+
+function initPlumes() {
+  plumes = [];
+  let placed = 0;
+  let attempts = 0;
+  while (placed < PLUME_COUNT && attempts < 500) {
+    attempts++;
+    const i = Math.floor(Math.random() * N);
+    const j = Math.floor(Math.random() * N);
+    const k = j*N + i;
+    const h = H1[k]+H2[k]+H3[k]+H4[k];
+    if (h < seaLevel - 40) continue;
+    let tooClose = false;
+    for (const p of plumes) {
+      let dxi = (p.i - i + N) % N; if (dxi > N/2) dxi -= N;
+      let dzj = (p.j - j + N) % N; if (dzj > N/2) dzj -= N;
+      if (dxi*dxi + dzj*dzj < 64) { tooClose = true; break; }
+    }
+    if (tooClose) continue;
+    plumes.push({ i, j, k, nextErupt: simTime + 20 + Math.random() * 60 });
+    placed++;
+  }
+}
+
+function eruptPlume(v) {
+  const { i, j, k } = v;
+  const isUnderwater = (H1[k]+H2[k]+H3[k]+H4[k]) < seaLevel;
+  const lavaVolume = isUnderwater ? LAVA_VOLUME * 0.6 : LAVA_VOLUME;
+
+  for (let dj = -CRATER_REACH; dj <= CRATER_REACH; dj++) {
+    for (let di = -CRATER_REACH; di <= CRATER_REACH; di++) {
+      const d2 = di*di + dj*dj;
+      if (d2 > CRATER_REACH * CRATER_REACH) continue;
+      const ni = ((i + di) % N + N) % N;
+      const nj = ((j + dj) % N + N) % N;
+      const kk = nj*N + ni;
+      const craterWeight = Math.exp(-d2 / (2 * CRATER_SIG * CRATER_SIG));
+      /* ИСПРАВЛЕНО: лава идёт в H4 и в lavaBonus */
+      const addH = lavaVolume * craterWeight;
+      H4[kk] += addH;
+      lavaBonus[kk] += addH;
+      if (d2 < HEAT_RADIUS * HEAT_RADIUS) {
+        eruptHeat[kk] = Math.min(1, eruptHeat[kk] + HEAT_AMOUNT * craterWeight);
+        snowLayer[kk] = Math.max(0, snowLayer[kk] - craterWeight * 2.0);
+        iceLayer[kk]  = Math.max(0, iceLayer[kk]  - craterWeight * 3.0);
+      }
+      const ashWeight = Math.exp(-d2 / (2 * ASH_SIG * ASH_SIG));
+      if (ashWeight > 0.005) {
+        const ash = ASH_VOLUME * ashWeight;
+        H1[kk] += ash;
+        ashLayer[kk] = Math.min(ASH_LAYER_MAX, ashLayer[kk] + ash);
+      }
+    }
+  }
+  v.nextErupt = simTime + PLUME_ERUPT_MIN +
+                Math.random() * (PLUME_ERUPT_MAX - PLUME_ERUPT_MIN);
+  lastEruption = { i, j, t: simTime, underwater: isUnderwater };
+}
+
+const PLATE_COUNT      = 16;
+const MAX_PLATES       = 32;
+const OCEAN_FRACTION   = 0.6;
+const DRIFT_INTERVAL   = 60;
+
+const MIN_PLATE_AREA   = 40;
+const SPLIT_AREA_MIN   = 300;
+const SPLIT_PROB       = 0.0008;
+const SPLIT_MANTLE_MIN = 0.35;
+const SPLIT_OFFSET_MIN = 8;
+const SPLIT_OFFSET_MAX = 23;
+
+const BLEND_WIDTH = 55;
+const RIDGE_WIDTH = 28;
+
+const CONT_TARGET_MIN  =   4;
+const CONT_TARGET_MAX  =  30;
+const OCEAN_TARGET_MIN = -50;
+const OCEAN_TARGET_MAX = -25;
+
+const RIDGE_MAX      = 45;
+const RIFT_MAX       = 25;
+const TRENCH_MAX     = 50;
+const ARC_MAX        = 35;
+const ARC_OFFSET     = 60;
+const ARC_SIG        = 30;
+const TRENCH_SIG     = 18;
+const MID_RIDGE_MAX  = 22;
+const AXIAL_RIFT_MAX = 10;
+
+const PLATE_VN_SCALE = 0.15;
+const VN_THRESHOLD   = 0.15;
+const RELAX_K = 0.010;
+const DETAIL_AMP  = 3;
+const DETAIL_FREQ = 2.5;
+const DETAIL_OCT  = 5;
+
+let plateCX, plateCZ, plateH, plateType, plateHills;
+let plateDriftVX, plateDriftVZ;
+let plateActive, plateArea;
+
+const plateF1     = new Float32Array(N*N);
+const plateF2     = new Float32Array(N*N);
+const plateK1     = new Int16Array(N*N);
+const plateK2     = new Int16Array(N*N);
+const plateH_A    = new Float32Array(N*N);
+const plateH_B    = new Float32Array(N*N);
+const plateTypeA  = new Int8Array(N*N);
+const plateTypeB  = new Int8Array(N*N);
+const plateHillsA = new Float32Array(N*N);
+const plateHillsB = new Float32Array(N*N);
+
+const targetSurface = new Float32Array(N*N);
+const SNOW_LINE = 40;
+
+const SLIDE_K = 0.5, DIFF_K = 0.35;
+const RAIN_BASE = 0.010, RAIN_VAR = 0.012;
+const EVAP = 0.025;
+const K_FLOW = 0.8;
+const K_CAP = 4.0, K_ERODE = 1.2, K_ERODE_ROCK = 0.06;
+const K_DEPOSIT = 0.30;
+const MAX_ERODE = 0.02;
+const WIND_CAP_BASE = 0.002, WIND_CAP_SLOPE = 0.04;
+const K_WIND_ERODE = 1.5, K_WIND_DEPOSIT = 0.6, MAX_WIND_ERODE = 0.002;
+
+const LAKE_FILL_RATE = 0.4;
+const LAKE_DRAIN_RATE = 0.4;
+
+const DIRS = [
+  [ 1,  0], [-1,  0], [ 0,  1], [ 0, -1],
+  [ 1,  1], [-1,  1], [ 1, -1], [-1, -1]
+];
+
+let overlayMode = 0;
+const OVERLAY_COUNT = 9;
+const OVERLAY_NAMES = [
+  'Биомы', 'Высота', 'Температура', 'Влажность',
+  'Водосбор', 'Снег', 'Лёд', 'Тектоника', 'Грунтовые воды'
+];
+
+let showSlice = false;
+let showGraphs = false;
+
+const HIST_LEN = 300;
+const histLand   = new Float32Array(HIST_LEN);
+const histSnow   = new Float32Array(HIST_LEN);
+const histIce    = new Float32Array(HIST_LEN);
+const histSea    = new Float32Array(HIST_LEN);
+const histPlates = new Float32Array(HIST_LEN);
+const histAq     = new Float32Array(HIST_LEN);
+let histHead = 0;
+let histCount = 0;
+
+const sliceCanvas = document.getElementById('sliceCanvas');
+const sliceCtx = sliceCanvas.getContext('2d');
+const graphCanvas = document.getElementById('graphCanvas');
+const graphCtx = graphCanvas.getContext('2d');
+
+const pfHeapIdx = new Int32Array(N*N * 4);
+const pfHeapLev = new Float32Array(N*N * 4);
+let pfHeapSize = 0;
+
+function pfPush(idx, lev) {
+  if (pfHeapSize >= pfHeapIdx.length) return;
+  pfHeapIdx[pfHeapSize] = idx;
+  pfHeapLev[pfHeapSize] = lev;
+  let i = pfHeapSize++;
+  while (i > 0) {
+    const p = (i-1) >> 1;
+    if (pfHeapLev[p] <= pfHeapLev[i]) break;
+    const ti = pfHeapIdx[p]; pfHeapIdx[p] = pfHeapIdx[i]; pfHeapIdx[i] = ti;
+    const tl = pfHeapLev[p]; pfHeapLev[p] = pfHeapLev[i]; pfHeapLev[i] = tl;
+    i = p;
+  }
+}
+function pfPop() {
+  const outIdx = pfHeapIdx[0];
+  pfHeapSize--;
+  if (pfHeapSize > 0) {
+    pfHeapIdx[0] = pfHeapIdx[pfHeapSize];
+    pfHeapLev[0] = pfHeapLev[pfHeapSize];
+    let i = 0;
+    while (true) {
+      const l = 2*i+1, r = 2*i+2;
+      let m = i;
+      if (l < pfHeapSize && pfHeapLev[l] < pfHeapLev[m]) m = l;
+      if (r < pfHeapSize && pfHeapLev[r] < pfHeapLev[m]) m = r;
+      if (m === i) break;
+      const ti = pfHeapIdx[m]; pfHeapIdx[m] = pfHeapIdx[i]; pfHeapIdx[i] = ti;
+      const tl = pfHeapLev[m]; pfHeapLev[m] = pfHeapLev[i]; pfHeapLev[i] = tl;
+      i = m;
+    }
+  }
+  return outIdx;
+}
+
+function computeSpillLevels() {
+  spillLevel.fill(1e9);
+  pfHeapSize = 0;
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    if (surface < seaLevel) {
+      spillLevel[k] = seaLevel;
+      pfPush(k, seaLevel);
+    }
+  }
+  if (pfHeapSize === 0) {
+    for (let k = 0; k < N*N; k++) {
+      spillLevel[k] = seaLevel;
+      pfPush(k, seaLevel);
+    }
+  }
+  while (pfHeapSize > 0) {
+    const k = pfPop();
+    const lev = spillLevel[k];
+    const i = k % N, j = (k / N) | 0;
+    for (let d = 0; d < 4; d++) {
+      const ni = ((i + DIRS[d][0]) % N + N) % N;
+      const nj = ((j + DIRS[d][1]) % N + N) % N;
+      const nk = nj*N + ni;
+      const surf = H1[nk]+H2[nk]+H3[nk]+H4[nk];
+      const newLev = Math.max(lev, surf);
+      if (newLev < spillLevel[nk]) {
+        spillLevel[nk] = newLev;
+        pfPush(nk, newLev);
+      }
+    }
+  }
+}
+
+function initPlates() {
+  plateCX = new Float32Array(MAX_PLATES);
+  plateCZ = new Float32Array(MAX_PLATES);
+  plateH  = new Float32Array(MAX_PLATES);
+  plateType  = new Int8Array(MAX_PLATES);
+  plateHills = new Float32Array(MAX_PLATES);
+  plateDriftVX = new Float32Array(MAX_PLATES);
+  plateDriftVZ = new Float32Array(MAX_PLATES);
+  plateActive = new Uint8Array(MAX_PLATES);
+  plateArea   = new Int32Array(MAX_PLATES);
+  for (let k = 0; k < PLATE_COUNT; k++) spawnRandomPlate(k);
+}
+function spawnRandomPlate(slot) {
+  plateCX[slot] = Math.random() * L;
+  plateCZ[slot] = Math.random() * L;
+  const isOcean = Math.random() < OCEAN_FRACTION;
+  if (isOcean) {
+    plateType[slot]  = 0;
+    plateH[slot]     = OCEAN_TARGET_MIN + Math.random() * (OCEAN_TARGET_MAX - OCEAN_TARGET_MIN);
+    plateHills[slot] = Math.random() * 0.15;
+  } else {
+    plateType[slot]  = 1;
+    const hills = Math.random();
+    plateHills[slot] = hills;
+    plateH[slot]     = CONT_TARGET_MIN + hills * (CONT_TARGET_MAX - CONT_TARGET_MIN);
+  }
+  const ang = Math.random() * TAU;
+  const spd = 0.05 + Math.random() * 0.15;
+  plateDriftVX[slot] = Math.cos(ang) * spd;
+  plateDriftVZ[slot] = Math.sin(ang) * spd;
+  plateActive[slot] = 1;
+}
+function deactivatePlate(k) { plateActive[k] = 0; }
+function countActivePlates() {
+  let c = 0;
+  for (let k = 0; k < MAX_PLATES; k++) if (plateActive[k]) c++;
+  return c;
+}
+function updatePlateLifecycle() {
+  plateArea.fill(0);
+  for (let k = 0; k < N*N; k++) {
+    const k1 = plateK1[k];
+    if (k1 >= 0 && plateActive[k1]) plateArea[k1]++;
+  }
+  for (let k = 0; k < MAX_PLATES; k++) {
+    if (plateActive[k] && plateArea[k] < MIN_PLATE_AREA) deactivatePlate(k);
+  }
+  for (let k = 0; k < MAX_PLATES; k++) {
+    if (!plateActive[k]) continue;
+    if (plateArea[k] < SPLIT_AREA_MIN) continue;
+    if (Math.random() > SPLIT_PROB) continue;
+    let bestIdx = -1, bestM = SPLIT_MANTLE_MIN;
+    for (let kk = 0; kk < N*N; kk++) {
+      if (plateK1[kk] !== k) continue;
+      if (mantleField[kk] > bestM) { bestM = mantleField[kk]; bestIdx = kk; }
+    }
+    if (bestIdx < 0) continue;
+    let slot = -1;
+    for (let s = 0; s < MAX_PLATES; s++) if (!plateActive[s]) { slot = s; break; }
+    if (slot < 0) continue;
+    const x = (bestIdx % N) * cellSize;
+    const z = ((bestIdx / N) | 0) * cellSize;
+    const offAng  = Math.random() * TAU;
+    const offDist = SPLIT_OFFSET_MIN + Math.random() * (SPLIT_OFFSET_MAX - SPLIT_OFFSET_MIN);
+    plateCX[slot] = wrap(x + Math.cos(offAng) * offDist);
+    plateCZ[slot] = wrap(z + Math.sin(offAng) * offDist);
+    plateH[slot]  = plateH[k];
+    plateType[slot]  = plateType[k];
+    plateHills[slot] = plateHills[k];
+    const pAng = Math.random() * TAU;
+    const pSpd = 0.03 + Math.random() * 0.06;
+    plateDriftVX[slot] = plateDriftVX[k] + Math.cos(pAng) * pSpd;
+    plateDriftVZ[slot] = plateDriftVZ[k] + Math.sin(pAng) * pSpd;
+    plateActive[slot] = 1;
+    computeWorleyFields();
+    break;
+  }
+}
+
+function computeWorleyFields() {
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = i*cellSize, z = j*cellSize;
+    let b1 = Infinity, b2 = Infinity, k1 = -1, k2 = -1;
+    for (let k = 0; k < MAX_PLATES; k++) {
+      if (!plateActive[k]) continue;
+      const dx = wrapRel(plateCX[k] - x), dz = wrapRel(plateCZ[k] - z);
+      const d2 = dx*dx + dz*dz;
+      if (d2 < b1)      { b2 = b1; k2 = k1; b1 = d2; k1 = k; }
+      else if (d2 < b2) { b2 = d2; k2 = k; }
+    }
+    const idx = j*N + i;
+    if (k1 < 0) {
+      plateF1[idx] = 1e9; plateF2[idx] = 1e9;
+      plateK1[idx] = -1; plateK2[idx] = -1;
+      plateH_A[idx] = 0; plateH_B[idx] = 0;
+      plateTypeA[idx] = 1; plateTypeB[idx] = 1;
+      plateHillsA[idx] = 0; plateHillsB[idx] = 0;
+      continue;
+    }
+    plateF1[idx]     = Math.sqrt(b1);
+    plateF2[idx]     = Math.sqrt(Math.max(b2, 0));
+    plateK1[idx]     = k1;
+    plateK2[idx]     = k2 < 0 ? k1 : k2;
+    plateH_A[idx]    = plateH[k1];
+    plateH_B[idx]    = plateH[plateK2[idx]];
+    plateTypeA[idx]  = plateType[k1];
+    plateTypeB[idx]  = plateType[plateK2[idx]];
+    plateHillsA[idx] = plateHills[k1];
+    plateHillsB[idx] = plateHills[plateK2[idx]];
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const k1 = plateK1[k], k2 = plateK2[k];
+    if (k1 < 0) { targetSurface[k] = 0; continue; }
+    const tA = plateTypeA[k], tB = plateTypeB[k];
+    const edge = plateF2[k] - plateF1[k];
+    const wA = 0.5 + 0.5 * Math.tanh(edge / BLEND_WIDTH);
+    const hA = plateH_A[k], hB = plateH_B[k];
+    const hBlend = wA * hA + (1 - wA) * hB;
+
+    const dx = wrapRel(plateCX[k2] - plateCX[k1]);
+    const dz = wrapRel(plateCZ[k2] - plateCZ[k1]);
+    const dNorm = Math.hypot(dx, dz) || 1;
+    const nx = dx / dNorm, nz = dz / dNorm;
+    const vRelX = plateDriftVX[k2] - plateDriftVX[k1];
+    const vRelZ = plateDriftVZ[k2] - plateDriftVZ[k1];
+    const vn = vRelX * nx + vRelZ * nz;
+    const vnNorm = Math.max(-1, Math.min(1, vn / PLATE_VN_SCALE));
+
+    const boundary = Math.exp(-edge*edge / (2*RIDGE_WIDTH*RIDGE_WIDTH));
+    let boundaryHeight = 0;
+    if (vnNorm < -VN_THRESHOLD) {
+      const conv = -vnNorm;
+      if (tA === 1 && tB === 1) boundaryHeight = RIDGE_MAX * conv * boundary;
+      else if (tA === 0 && tB === 0) boundaryHeight = -TRENCH_MAX * 0.7 * conv * boundary;
+      else {
+        if (tA === 0) {
+          boundaryHeight = -TRENCH_MAX * conv *
+            Math.exp(-edge*edge / (2*TRENCH_SIG*TRENCH_SIG));
+        } else {
+          const d = edge - ARC_OFFSET;
+          boundaryHeight = ARC_MAX * conv *
+            Math.exp(-d*d / (2*ARC_SIG*ARC_SIG));
+        }
+      }
+    } else if (vnNorm > VN_THRESHOLD) {
+      const div = vnNorm;
+      if (tA === 1 && tB === 1) boundaryHeight = -RIFT_MAX * div * boundary;
+      else if (tA === 0 && tB === 0) {
+        const midRidge = MID_RIDGE_MAX * div * boundary;
+        const axialRift = -AXIAL_RIFT_MAX * div *
+          Math.exp(-edge*edge / (2*8*8));
+        boundaryHeight = midRidge + axialRift;
+      }
+    }
+
+    let plateau = 0;
+    if (vnNorm > VN_THRESHOLD && tA === 1 && tB === 1) {
+      const d = Math.abs(edge - PLATEAU_OFFSET);
+      plateau = PLATEAU_MAX * vnNorm * Math.exp(-d*d / (2 * PLATEAU_SIG * PLATEAU_SIG));
+    }
+
+    const x = (k % N) * cellSize;
+    const z = ((k / N) | 0) * cellSize;
+    const hillsBlend = wA * plateHillsA[k] + (1 - wA) * plateHillsB[k];
+    const detailNoise = fbmTorus(x, z, DETAIL_OCT, DETAIL_FREQ, worldSeed + 777);
+    const detail = DETAIL_AMP * (0.3 + 0.7 * hillsBlend) * detailNoise;
+
+    targetSurface[k] = hBlend + boundaryHeight + plateau + detail;
+  }
+
+  /* ИСПРАВЛЕНО: лава — часть постоянной цели. Релаксация не съест конус. */
+  for (let k = 0; k < N*N; k++) {
+    targetSurface[k] += lavaBonus[k];
+  }
+}
+
+function computeMantleField(t) {
+  const ox = Math.cos(t * MANTLE_DRIFT) * 4.0;
+  const oy = Math.sin(t * MANTLE_DRIFT) * 4.0;
+  for (let k = 0; k < N*N; k++) {
+    const x = (k % N) * cellSize;
+    const z = ((k / N) | 0) * cellSize;
+    const u = (x / L) * TAU, v = (z / L) * TAU;
+    const cu = Math.cos(u), su = Math.sin(u), cv = Math.cos(v), sv = Math.sin(v);
+    mantleField[k] = vnoise4(cu*1.4 + ox, su*1.4 + oy,
+                             cv*1.4 - ox, sv*1.4 + oy,
+                             worldSeed + 999);
+  }
+}
+
+function computeClimate(t) {
+  humDist.fill(1e9);
+  let head = 0, tail = 0;
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    if (surface < seaLevel || W[k] > 0.05 || iceLayer[k] > 0.05) {
+      humDist[k] = 0;
+      bfsQueue[tail++] = k;
+    }
+  }
+  while (head < tail) {
+    const k = bfsQueue[head++];
+    const i = k % N, j = (k / N) | 0;
+    const d = humDist[k] + 1;
+    for (let dd = 0; dd < 4; dd++) {
+      const ni = ((i + DIRS[dd][0]) % N + N) % N;
+      const nj = ((j + DIRS[dd][1]) % N + N) % N;
+      const nk = nj*N + ni;
+      if (humDist[nk] > d) { humDist[nk] = d; bfsQueue[tail++] = nk; }
+    }
+  }
+
+  for (let j = 0; j < N; j++) {
+    const wX = windDirX(j);
+    const wZ = windDirZ(j);
+    const stepX = wX * 4;
+    const stepZ = wZ * 4;
+    for (let i = 0; i < N; i++) {
+      const k = j*N + i;
+      const h = H1[k]+H2[k]+H3[k]+H4[k];
+      let maxBarrier = 0;
+      for (let s = 1; s <= SHADOW_STEPS; s++) {
+        const ni = ((i - Math.round(stepX * s)) % N + N) % N;
+        const nj = ((j - Math.round(stepZ * s)) % N + N) % N;
+        const nk = nj*N + ni;
+        const nh = H1[nk]+H2[nk]+H3[nk]+H4[nk];
+        const barrier = nh - h;
+        if (barrier > maxBarrier) maxBarrier = barrier;
+      }
+      rainShadow[k] = Math.exp(-maxBarrier / SHADOW_K);
+    }
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const distHum = Math.exp(-humDist[k] / HUMIDITY_FALLOFF);
+    const riverTerm = Math.min(1, Math.log(1 + flowAccumRouting[k]) / Math.log(1 + 200)) * 0.7;
+    const x = (k % N) * cellSize;
+    const z = ((k / N) | 0) * cellSize;
+    const noise = 0.5 + 0.5 * fbmTorus(x, z, 3, 2.0, worldSeed + 555);
+    let h = (0.15 + 0.55 * distHum + riverTerm + 0.15 * noise) * rainShadow[k];
+    if (h > 1) h = 1;
+    if (h < 0) h = 0;
+    humidity[k] = h;
+  }
+
+  currentT.fill(0);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const k = j*N + i;
+      const surface = H1[k]+H2[k]+H3[k]+H4[k];
+      if (surface > seaLevel - 2) continue;
+      let westLand = false, eastLand = false;
+      for (let s = 1; s <= OCEAN_CURRENT_RANGE; s++) {
+        const nw = ((i - s) % N + N) % N;
+        const ne = ((i + s) % N + N) % N;
+        const kw = j*N + nw, ke = j*N + ne;
+        if (H1[kw]+H2[kw] > seaLevel) westLand = true;
+        if (H1[ke]+H2[ke] > seaLevel) eastLand = true;
+      }
+      if (westLand)      currentT[k] = COLD_CURRENT;
+      else if (eastLand) currentT[k] = WARM_CURRENT;
+    }
+  }
+
+  const seasonOffset = SEASON_AMP * Math.sin(t * SEASON_RATE);
+  for (let k = 0; k < N*N; k++) {
+    const z = ((k / N) | 0) * cellSize;
+    const zShift = z + seasonOffset;
+    const lat = 0.5 + 0.5 * Math.cos(TAU * zShift / L);
+    const h = H1[k]+H2[k]+H3[k]+H4[k];
+    const alt = Math.max(0, h) / 80;
+    let t2 = lat * (1 - TEMP_ALT_LAPSE * alt) + currentT[k];
+    t2 += eruptHeat[k] * 0.35;
+    if (t2 < 0) t2 = 0;
+    if (t2 > 1) t2 = 1;
+    temperature[k] = t2;
+  }
+}
+
+function updateSeaLevel() {
+  let tSum = 0;
+  for (let k = 0; k < N*N; k++) tSum += temperature[k];
+  const tAvg = tSum / (N*N);
+  tRef += (tAvg - tRef) * T_REF_ALPHA;
+  const anomaly = tAvg - tRef;
+  let target = -SEA_TEMP_GAIN * anomaly;
+  if (target < SEA_LEVEL_MIN) target = SEA_LEVEL_MIN;
+  if (target > SEA_LEVEL_MAX) target = SEA_LEVEL_MAX;
+  seaLevel += (target - seaLevel) * SEA_SMOOTH;
+  if (seaLevel < SEA_LEVEL_MIN) seaLevel = SEA_LEVEL_MIN;
+  if (seaLevel > SEA_LEVEL_MAX) seaLevel = SEA_LEVEL_MAX;
+}
+
+const bucketHead = new Int32Array(NBUCKETS);
+const bucketNext = new Int32Array(N*N);
+const bucketData = new Float32Array(N*N);
+
+function computeFlowRouting() {
+  for (let k = 0; k < N*N; k++)
+    bucketData[k] = H1[k] + H2[k] + H3[k] + H4[k];
+
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = 0;
+    for (let j = 0; j < N; j++) {
+      const jN = (j+1)%N, jS = (j-1+N)%N;
+      const rowC = j*N, rowN = jN*N, rowS = jS*N;
+      for (let i = 0; i < N; i++) {
+        const iE = (i+1)%N, iW = (i-1+N)%N;
+        const idx = rowC + i;
+        const h = bucketData[idx];
+        if (h <= seaLevel) continue;
+        let minN = Infinity;
+        let m;
+        m = bucketData[rowC + iE]; if (m < minN) minN = m;
+        m = bucketData[rowC + iW]; if (m < minN) minN = m;
+        m = bucketData[rowN + i ]; if (m < minN) minN = m;
+        m = bucketData[rowS + i ]; if (m < minN) minN = m;
+        m = bucketData[rowN + iE]; if (m < minN) minN = m;
+        m = bucketData[rowN + iW]; if (m < minN) minN = m;
+        m = bucketData[rowS + iE]; if (m < minN) minN = m;
+        m = bucketData[rowS + iW]; if (m < minN) minN = m;
+        if (h < minN - FILL_EPS) {
+          bucketData[idx] = minN + FILL_EPS;
+          changed++;
+        }
+      }
+    }
+    if (changed === 0) break;
+  }
+
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const idx = j*N + i;
+      const surface = H1[idx]+H2[idx]+H3[idx]+H4[idx];
+      if (surface < seaLevel) { flowDir[idx] = -1; continue; }
+      const h = bucketData[idx];
+      let bestH = h, bestDir = -1;
+      for (let d = 0; d < 8; d++) {
+        const ni = ((i + DIRS[d][0]) % N + N) % N;
+        const nj = ((j + DIRS[d][1]) % N + N) % N;
+        const nh = bucketData[nj*N + ni];
+        if (nh < bestH) { bestH = nh; bestDir = d; }
+      }
+      flowDir[idx] = bestDir;
+    }
+  }
+
+  bucketHead.fill(-1);
+  const hMin = -100, hMax = 100;
+  const hRange = hMax - hMin;
+
+  for (let k = 0; k < N*N; k++) {
+    const h = bucketData[k];
+    let b = Math.floor((h - hMin) / hRange * NBUCKETS);
+    if (b < 0) b = 0;
+    if (b >= NBUCKETS) b = NBUCKETS - 1;
+    bucketNext[k] = bucketHead[b];
+    bucketHead[b] = k;
+  }
+
+  flowAccumRouting.fill(1.0);
+  for (let b = NBUCKETS - 1; b >= 0; b--) {
+    for (let k = bucketHead[b]; k !== -1; k = bucketNext[k]) {
+      const d = flowDir[k];
+      if (d < 0) continue;
+      const i = k % N, j = (k / N) | 0;
+      const ni = ((i + DIRS[d][0]) % N + N) % N;
+      const nj = ((j + DIRS[d][1]) % N + N) % N;
+      const nidx = nj*N + ni;
+      flowAccumRouting[nidx] += flowAccumRouting[k];
+    }
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    if (surface < seaLevel) flowAccumRouting[k] = 0;
+  }
+}
+
+function bilinearWrap(field, sx, sz) {
+  sx = ((sx % N) + N) % N;
+  sz = ((sz % N) + N) % N;
+  const i0 = Math.floor(sx), j0 = Math.floor(sz);
+  const i1 = (i0 + 1) % N, j1 = (j0 + 1) % N;
+  const tx = sx - i0, tz = sz - j0;
+  const a = field[j0*N + i0];
+  const b = field[j0*N + i1];
+  const c = field[j1*N + i0];
+  const d = field[j1*N + i1];
+  return (a*(1-tx) + b*tx)*(1-tz) + (c*(1-tx) + d*tx)*tz;
+}
+
+function advectLayers(dtAdv) {
+  const inv = dtAdv / cellSize;
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const idx = j*N + i;
+      const k1 = plateK1[idx];
+      if (k1 < 0) continue;
+      const k2 = plateK2[idx];
+      const edge = plateF2[idx] - plateF1[idx];
+      const wA = 0.5 + 0.5 * Math.tanh(edge / BLEND_WIDTH);
+      const vx = wA * plateDriftVX[k1] + (1 - wA) * plateDriftVX[k2];
+      const vz = wA * plateDriftVZ[k1] + (1 - wA) * plateDriftVZ[k2];
+      const sx = i - vx * inv;
+      const sz = j - vz * inv;
+      H1t[idx] = bilinearWrap(H1, sx, sz);
+      H2t[idx] = bilinearWrap(H2, sx, sz);
+      H3t[idx] = bilinearWrap(H3, sx, sz);
+      H4t[idx] = bilinearWrap(H4, sx, sz);
+      /* ИСПРАВЛЕНО: лава дрейфует вместе с плитой */
+      lavaBonusT[idx] = bilinearWrap(lavaBonus, sx, sz);
+    }
+  }
+  H1.set(H1t); H2.set(H2t); H3.set(H3t); H4.set(H4t);
+  lavaBonus.set(lavaBonusT);
+}
+
+function initSoil(idx) {
+  const t = targetSurface[idx];
+  if (t < seaLevel - 8) return 0.05;
+  const n = fbmTorus((idx%N)*cellSize, ((idx/N)|0)*cellSize, 3, 6.0, worldSeed + 11);
+  return Math.max(0.05, 0.5 + 0.4 * n);
+}
+function initGravel(idx) {
+  const t = targetSurface[idx];
+  if (t < seaLevel - 15) return 0.1;
+  const n = fbmTorus((idx%N)*cellSize, ((idx/N)|0)*cellSize, 3, 5.0, worldSeed + 22);
+  return Math.max(0.1, 1.5 + 0.7 * n);
+}
+function initSoftRock(idx) {
+  const t = targetSurface[idx];
+  if (t < seaLevel - 10) return 0.2;
+  const n = fbmTorus((idx%N)*cellSize, ((idx/N)|0)*cellSize, 3, 4.0, worldSeed + 33);
+  return Math.max(0.2, 3.5 + 1.5 * n);
+}
+
+let simTime = 0, simStepCount = 0, simClampViolations = 0;
+let rainEnabled = true, windEnabled = true, iceEnabled = true;
+let birthsTotal = 0, deathsTotal = 0;
+let routingRuns = 0, advectRuns = 0, climateRuns = 0;
+let eruptionsTotal = 0;
+
+function resetTerrain(regen = false) {
+  if (regen) worldSeed = (Math.random() * 0x7fffffff) | 0;
+  seaLevel = 0;
+  tRef = 0.5;
+
+  initPlates();
+  computeWorleyFields();
+  computeMantleField(0);
+
+  for (let k = 0; k < N*N; k++) {
+    H3[k] = initSoftRock(k);
+    H2[k] = initGravel(k);
+    H1[k] = initSoil(k);
+    snowLayer[k] = 0;
+    iceLayer[k] = 0;
+    Aq[k] = 0;
+    Aqtmp[k] = 0;
+    /* ИСПРАВЛЕНО: обнуляем лаву */
+    lavaBonus[k] = 0;
+    lavaBonusT[k] = 0;
+  }
+  for (let k = 0; k < N*N; k++) {
+    const H123 = H1[k] + H2[k] + H3[k];
+    H4[k] = targetSurface[k] - H123;
+  }
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    W[k] = surface < seaLevel ? (seaLevel - surface) : 0;
+  }
+  Sed.fill(0); Fmag.fill(0);
+  windSed.fill(0); windSedB.fill(0);
+  eruptHeat.fill(0);
+  ashLayer.fill(0);
+  flowDir.fill(-1);
+  flowAccumRouting.fill(1);
+  spillLevel.fill(0);
+  computeFlowRouting();
+  computeSpillLevels();
+  computeClimate(0);
+
+  {
+    let tSum = 0;
+    for (let k = 0; k < N*N; k++) tSum += temperature[k];
+    tRef = tSum / (N*N);
+  }
+
+  plumes = [];
+  initPlumes();
+  lastEruption = { i: -1, j: -1, t: -1e9, underwater: false };
+
+  simTime = 0; simStepCount = 0; simClampViolations = 0;
+  birthsTotal = 0; deathsTotal = 0;
+  routingRuns = 0; advectRuns = 0; climateRuns = 0;
+  eruptionsTotal = 0;
+
+  histHead = 0; histCount = 0;
+  histLand.fill(0); histSnow.fill(0); histIce.fill(0);
+  histSea.fill(0); histPlates.fill(0); histAq.fill(0);
+
+  syncTextures();
+}
+
+function sampleHeight(x, z) {
+  x = wrap(x); z = wrap(z);
+  const fx = x/cellSize, fz = z/cellSize;
+  const i0 = Math.floor(fx) % N, j0 = Math.floor(fz) % N;
+  const i1 = (i0+1) % N, j1 = (j0+1) % N;
+  const tx = fx - Math.floor(fx), tz = fz - Math.floor(fz);
+  const top = k => {
+    const s = H1[k]+H2[k]+H3[k]+H4[k];
+    if (s > seaLevel) return s + snowLayer[k];
+    if (iceLayer[k] > 0.05) return seaLevel + ICE_FREEBORD_RATIO * iceLayer[k] + snowLayer[k];
+    return s;
+  };
+  return ((top(j0*N+i0)*(1-tx)+top(j0*N+i1)*tx)*(1-tz)
+        + (top(j1*N+i0)*(1-tx)+top(j1*N+i1)*tx)*tz);
+}
+
+function talusPair(a, b, dt) {
+  const hA = H1t[a]+H2t[a]+H3t[a]+H4t[a];
+  const hB = H1t[b]+H2t[b]+H3t[b]+H4t[b];
+  const d = hA - hB, ad = Math.abs(d);
+  if (ad < TALUS[0]) return;
+  const src = d > 0 ? a : b, dst = d > 0 ? b : a;
+
+  let m = SLIDE_K * Math.max(0, ad - TALUS[0]) * dt;
+  if (m > 0) {
+    const amt = Math.min(Math.max(0, H1t[src]), m);
+    if (amt > 0) { H1t[src] -= amt; H1t[dst] += amt; }
+  }
+  m = SLIDE_K * Math.max(0, ad - TALUS[1]) * dt;
+  if (m > 0) {
+    const amt = Math.min(Math.max(0, H2t[src]), m);
+    if (amt > 0) { H2t[src] -= amt; H2t[dst] += amt; }
+  }
+  m = SLIDE_K * Math.max(0, ad - TALUS[2]) * dt;
+  if (m > 0) {
+    const amt = Math.min(Math.max(0, H3t[src]), m);
+    if (amt > 0) { H3t[src] -= amt; H3t[dst] += amt; }
+  }
+  m = SLIDE_K * Math.max(0, ad - TALUS[3]) * dt;
+  if (m > 0) {
+    const amt = Math.min(Math.max(0, H4t[src]), m);
+    if (amt > 0) { H4t[src] -= amt; H4t[dst] += amt; }
+  }
+  const dSoft = H1t[a]-H1t[b];
+  const diffAmt = DIFF_K * dSoft * dt;
+  if (diffAmt > 0) {
+    const amt = Math.min(Math.max(0, H1t[a]), diffAmt);
+    H1t[a] -= amt; H1t[b] += amt;
+  } else if (diffAmt < 0) {
+    const amt = Math.min(Math.max(0, H1t[b]), -diffAmt);
+    H1t[b] -= amt; H1t[a] += amt;
+  }
+}
+
+/* ИСПРАВЛЕНО: weight = 0.05 — Sed идёт по руслу, не растекается */
+function waterPairBiased(a, b, dt, dirFromA, dirFromB) {
+  const sa = H1[a]+H2[a]+H3[a]+H4[a]+Wtmp[a];
+  const sb = H1[b]+H2[b]+H3[b]+H4[b]+Wtmp[b];
+  const d = sa - sb;
+  if (Math.abs(d) < 1e-6) return;
+
+  const src = d > 0 ? a : b;
+  const dst = d > 0 ? b : a;
+
+  let weight = 0.05;
+  if (d > 0) {
+    if (flowDir[a] === dirFromA) weight = 1.0;
+  } else {
+    if (flowDir[b] === dirFromB) weight = 1.0;
+  }
+
+  const availW = Math.max(0, Wtmp[src]);
+  let q = K_FLOW * weight * Math.abs(d) * dt;
+  q = Math.min(q, availW * 0.25);
+  if (q <= 0) return;
+  const wFrac = q / Math.max(availW, 1e-6);
+  const sedFlux = Math.max(0, Sedtmp[src]) * Math.min(wFrac, 1);
+  Wtmp[src] -= q; Wtmp[dst] += q;
+  Sedtmp[src] -= sedFlux; Sedtmp[dst] += sedFlux;
+  Fmag[src] += q; Fmag[dst] += q;
+}
+
+/* ИСПРАВЛЕНО: weight = 0.02 — Aq сильнее концентрируется в долинах */
+function aqPair(a, b, dt, dirFromA, dirFromB) {
+  const hA = H1[a]+H2[a]+H3[a]+H4[a] + Aqtmp[a];
+  const hB = H1[b]+H2[b]+H3[b]+H4[b] + Aqtmp[b];
+  const d = hA - hB;
+  if (Math.abs(d) < 1e-5) return;
+
+  const src = d > 0 ? a : b;
+  const dst = d > 0 ? b : a;
+
+  let weight = 0.02;
+  if (d > 0) {
+    if (flowDir[a] === dirFromA) weight = 1.0;
+  } else {
+    if (flowDir[b] === dirFromB) weight = 1.0;
+  }
+
+  const availAq = Math.max(0, Aqtmp[src]);
+  let q = AQ_FLOW * weight * Math.abs(d) * dt;
+  q = Math.min(q, availAq * 0.10);
+  if (q <= 0) return;
+  Aqtmp[src] -= q;
+  Aqtmp[dst] += q;
+}
+
+function windAdvect(dt) {
+  windSedB.set(windSed);
+  for (let j = 0; j < N; j++) {
+    const wX = windDirX(j);
+    const wZ = windDirZ(j);
+    const vx = wX * WIND_SPEED * dt / cellSize;
+    const vz = wZ * WIND_SPEED * dt / cellSize;
+    const cfl = Math.abs(vx) + Math.abs(vz);
+    const s = cfl > 0.9 ? 0.9 / cfl : 1;
+    const vxs = vx * s, vzs = vz * s;
+    const rowC = j * N;
+    for (let i = 0; i < N; i++) {
+      let sx = i - vxs, sz = j - vzs;
+      sx = ((sx % N) + N) % N; sz = ((sz % N) + N) % N;
+      const i0 = Math.floor(sx), j0 = Math.floor(sz);
+      const i1 = (i0+1)%N, j1 = (j0+1)%N;
+      const tx = sx - i0, tz = sz - j0;
+      const a = windSedB[j0*N+i0], b = windSedB[j0*N+i1];
+      const c = windSedB[j1*N+i0], d = windSedB[j1*N+i1];
+      windSed[rowC + i] = (a*(1-tx)+b*tx)*(1-tz) + (c*(1-tx)+d*tx)*tz;
+    }
+  }
+}
+
+function windErodeDeposit(dt, t) {
+  const strength = 0.7 + 0.3 * Math.sin(t * 0.11);
+  for (let j = 0; j < N; j++) {
+    const wX = windDirX(j);
+    const wZ = windDirZ(j);
+    const jN = (j+1)%N, jS = (j-1+N)%N;
+    const rowC = j*N, rowN = jN*N, rowS = jS*N;
+    for (let i = 0; i < N; i++) {
+      const iE = (i+1)%N, iW = (i-1+N)%N, idx = rowC+i;
+      const hE = H1[rowC+iE]+H2[rowC+iE]+H3[rowC+iE]+H4[rowC+iE];
+      const hW = H1[rowC+iW]+H2[rowC+iW]+H3[rowC+iW]+H4[rowC+iW];
+      const hU = H1[rowN+i ]+H2[rowN+i ]+H3[rowN+i ]+H4[rowN+i ];
+      const hD = H1[rowS+i ]+H2[rowS+i ]+H3[rowS+i ]+H4[rowS+i ];
+      const dhdx = (hE-hW)/(2*cellSize), dhdz = (hU-hD)/(2*cellSize);
+      const dh_dw = dhdx*wX + dhdz*wZ;
+      let cap = (WIND_CAP_BASE + WIND_CAP_SLOPE * Math.max(0, -dh_dw)) * strength;
+      if (cap < 0) cap = 0;
+      const wv = W[idx];
+      const dry = wv < 0.02 ? 1 : (wv < 0.10 ? 0.2 : 0);
+      const hum = humidity[idx];
+      const erosionMul = 1 + 2.0 * (1 - hum);
+      const depositMul = 1 + 3.0 * hum;
+      const s = windSed[idx];
+      if (cap > s) {
+        let amount = (cap - s) * K_WIND_ERODE * dt * dry * erosionMul;
+        if (amount > MAX_WIND_ERODE) amount = MAX_WIND_ERODE;
+        if (amount > 0) {
+          const e = Math.min(H1[idx], amount);
+          if (e > 0) { H1[idx] -= e; windSed[idx] += e; }
+        }
+      } else if (s > cap) {
+        let amount = (s - cap) * K_WIND_DEPOSIT * dt * depositMul;
+        if (amount > s) amount = s;
+        if (amount > 0) { H1[idx] += amount; windSed[idx] -= amount; }
+      }
+    }
+  }
+}
+
+function glacierStep(dt, t) {
+  for (let j = 0; j < N; j++) {
+    const jN = (j+1)%N, jS = (j-1+N)%N;
+    const rowC = j*N, rowN = jN*N, rowS = jS*N;
+    for (let i = 0; i < N; i++) {
+      const iE = (i+1)%N, iW = (i-1+N)%N, idx = rowC+i;
+      const temp = temperature[idx];
+      const surface = H1[idx]+H2[idx]+H3[idx]+H4[idx];
+      const isOcean = surface < seaLevel;
+
+      const hE = H1[rowC+iE]+H2[rowC+iE]+H3[rowC+iE]+H4[rowC+iE];
+      const hW = H1[rowC+iW]+H2[rowC+iW]+H3[rowC+iW]+H4[rowC+iW];
+      const hU = H1[rowN+i ]+H2[rowN+i ]+H3[rowN+i ]+H4[rowN+i ];
+      const hD = H1[rowS+i ]+H2[rowS+i ]+H3[rowS+i ]+H4[rowS+i ];
+      const dhdx = (hE-hW)/(2*cellSize), dhdz = (hU-hD)/(2*cellSize);
+      const slope = Math.hypot(dhdx, dhdz);
+      const slopeFactor = Math.max(0, 1 - slope / 1.5);
+
+      if (isOcean) {
+        if (temp < ICE_TEMP) {
+          const coldFactor = Math.min(1, (ICE_TEMP - temp) / 0.15);
+          const accum = ICE_FORM_RATE * coldFactor * dt;
+          iceLayer[idx] = Math.min(ICE_MAX_LAYER, iceLayer[idx] + accum);
+        } else if (temp > ICE_TEMP + 0.02) {
+          const warm = Math.min(1, (temp - ICE_TEMP) / 0.15);
+          iceLayer[idx] = Math.max(0, iceLayer[idx] - ICE_MELT_RATE * warm * dt);
+        }
+      } else {
+        if (iceLayer[idx] > 0) {
+          iceLayer[idx] = Math.max(0, iceLayer[idx] - ICE_MELT_RATE * 2 * dt);
+        }
+      }
+
+      const hasSolidTop = !isOcean || iceLayer[idx] > 0.05;
+      if (temp < SNOW_TEMP && hasSolidTop) {
+        const coldFactor = Math.min(1, (SNOW_TEMP - temp) / 0.15);
+        const accum = ICE_ACCUM * slopeFactor * (0.3 + 0.7 * coldFactor) * dt;
+        const headroom = SNOW_MAX - snowLayer[idx];
+        snowLayer[idx] += Math.min(accum, headroom);
+      } else if (temp < SNOW_TEMP + MELT_BAND_T && snowLayer[idx] > 0) {
+        const melt = (temp - SNOW_TEMP) / MELT_BAND_T;
+        const meltAmt = MELT_RATE * melt * dt;
+        const fromSnow = Math.min(snowLayer[idx], meltAmt);
+        snowLayer[idx] -= fromSnow;
+        if (!isOcean && fromSnow > 0) {
+          W[idx]  += fromSnow * MELT_TO_W;
+          Aq[idx] = Math.min(AQ_MAX, Aq[idx] + fromSnow * MELT_TO_AQ);
+        }
+      } else if (temp >= SNOW_TEMP + MELT_BAND_T && snowLayer[idx] > 0) {
+        const meltAmt = MELT_RATE * dt;
+        const fromSnow = Math.min(snowLayer[idx], meltAmt);
+        snowLayer[idx] -= fromSnow;
+        if (!isOcean && fromSnow > 0) {
+          W[idx]  += fromSnow * MELT_TO_W;
+          Aq[idx] = Math.min(AQ_MAX, Aq[idx] + fromSnow * MELT_TO_AQ);
+        }
+      }
+
+      if (iceLayer[idx] > 0.05 && snowLayer[idx] > 0.3) {
+        const compact = Math.min(snowLayer[idx] - 0.1, SNOW_COMPACT_RATE * dt);
+        if (compact > 0) {
+          snowLayer[idx] -= compact;
+          iceLayer[idx] = Math.min(ICE_MAX_LAYER, iceLayer[idx] + compact * SNOW_TO_ICE_RATIO);
+        }
+      }
+    }
+  }
+}
+
+function simulate(dt) {
+  simTime += dt; simStepCount++;
+  const t = simTime;
+
+  if (simStepCount % DRIFT_INTERVAL === 0) {
+    const dts = DRIFT_INTERVAL * dt;
+    for (let k = 0; k < MAX_PLATES; k++) {
+      if (!plateActive[k]) continue;
+      plateCX[k] = wrap(plateCX[k] + plateDriftVX[k] * dts);
+      plateCZ[k] = wrap(plateCZ[k] + plateDriftVZ[k] * dts);
+    }
+    computeWorleyFields();
+    computeMantleField(t);
+    const before = countActivePlates();
+    updatePlateLifecycle();
+    const after = countActivePlates();
+    if (after > before) birthsTotal += (after - before);
+    else if (after < before) deathsTotal += (before - after);
+  }
+
+  if (simStepCount % ADVECT_INTERVAL === 0) {
+    advectLayers(ADVECT_INTERVAL * dt);
+    advectRuns++;
+  }
+
+  if (simStepCount % FLOW_ROUTING_INTERVAL === 0) {
+    computeFlowRouting();
+    computeSpillLevels();
+    routingRuns++;
+  }
+
+  if (simStepCount % CLIMATE_INTERVAL === 0) {
+    computeClimate(t);
+    updateSeaLevel();
+    climateRuns++;
+  }
+
+  if (volcanoesEnabled) {
+    for (const v of plumes) {
+      if (simTime >= v.nextErupt) {
+        eruptPlume(v);
+        eruptionsTotal++;
+      }
+    }
+  }
+  for (let k = 0; k < N*N; k++) {
+    if (eruptHeat[k] > 0.001) eruptHeat[k] *= HEAT_DECAY;
+    else eruptHeat[k] = 0;
+    if (ashLayer[k] > 0.001) ashLayer[k] *= 0.9995;
+    else ashLayer[k] = 0;
+  }
+
+  const pulse = 0.7 + 0.3 * Math.sin(t * 0.11);
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    const target  = targetSurface[k];
+    const m = mantleField[k];
+    H4[k] += RELAX_K * (target - surface) * pulse * dt;
+    H4[k] += MANTLE_RATE * m * dt;
+  }
+
+  H1t.set(H1); H2t.set(H2); H3t.set(H3); H4t.set(H4);
+  for (let j = 0; j < N; j++) {
+    const jS = (j+1)%N;
+    const rowC = j*N, rowN = jS*N;
+    for (let i = 0; i < N; i++) {
+      const iE = (i+1)%N, a = rowC + i;
+      talusPair(a, rowC + iE, dt);
+      talusPair(a, rowN + i,  dt);
+    }
+  }
+  H1.set(H1t); H2.set(H2t); H3.set(H3t); H4.set(H4t);
+
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    const isUnderwater = surface < seaLevel;
+    const lithH1 = isUnderwater ? 0.008 : 0.0003;
+    const lithH2 = isUnderwater ? 0.004 : 0.0003;
+    const lithH3 = isUnderwater ? 0.001 : 0.0001;
+
+    if (H1[k] > 0) {
+      const amt = Math.min(H1[k], lithH1 * H1[k] * dt);
+      H1[k] -= amt; H2[k] += amt;
+    }
+    if (H2[k] > 0) {
+      const amt = Math.min(H2[k], lithH2 * H2[k] * dt);
+      H2[k] -= amt; H3[k] += amt;
+    }
+    if (H3[k] > 0 && (H1[k] + H2[k]) > 2.0) {
+      const amt = Math.min(H3[k], lithH3 * H3[k] * dt);
+      H3[k] -= amt; H4[k] += amt;
+    }
+    if (!isUnderwater) {
+      const moisture = 0.5 + 0.5 * Math.min(1, W[k] * 8);
+      const exp2 = Math.exp(-H1[k] / 0.5);
+      if (H2[k] > 0 && exp2 > 0.02) {
+        const amt = Math.min(H2[k], 0.004 * exp2 * moisture * dt);
+        H2[k] -= amt; H1[k] += amt;
+      }
+      const exp3 = Math.exp(-(H1[k] + H2[k]) / 0.8);
+      if (H3[k] > 0 && exp3 > 0.02) {
+        const amt = Math.min(H3[k], 0.002 * exp3 * moisture * dt);
+        H3[k] -= amt; H2[k] += amt;
+      }
+      const exp4 = Math.exp(-(H1[k] + H2[k] + H3[k]) / 1.0);
+      if (H4[k] > 0 && exp4 > 0.02) {
+        const amt = Math.min(H4[k], 0.0005 * exp4 * moisture * dt);
+        H4[k] -= amt; H3[k] += amt;
+      }
+    }
+  }
+
+  if (iceEnabled) glacierStep(dt, t);
+
+  if (windEnabled) { windAdvect(dt); windErodeDeposit(dt, t); }
+  else {
+    for (let k = 0; k < N*N; k++) if (windSed[k] > 0) {
+      H1[k] += windSed[k]; windSed[k] = 0;
+    }
+  }
+
+  if (rainEnabled) {
+    for (let j = 0; j < N; j++) {
+      const v = (j/N) * TAU, jN = j*N;
+      for (let i = 0; i < N; i++) {
+        const u = (i/N) * TAU, idx = jN + i;
+        const cloud = 0.5
+          + 0.35 * Math.sin(2*u + t*0.06) * Math.cos(3*v - t*0.04)
+          + 0.15 * Math.sin(5*u - 2*v + t*0.10);
+        const regional = 0.3 + 0.7 * humidity[idx];
+        const rate = (RAIN_BASE + RAIN_VAR * Math.max(0, cloud - 0.2)) * regional;
+        const surface = H1[idx]+H2[idx]+H3[idx]+H4[idx];
+        if (surface >= seaLevel) {
+          W[idx]  += rate * dt * 0.7;
+          Aq[idx] = Math.min(AQ_MAX, Aq[idx] + rate * dt * 0.3);
+        } else {
+          W[idx]  += rate * dt;
+        }
+      }
+    }
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    const isUnderwater = surface < seaLevel;
+    if (!isUnderwater && W[k] > 0.0005 && Aq[k] < AQ_MAX) {
+      const infil = Math.min(W[k] * 0.5, INFIL_RATE * W[k] * dt);
+      W[k] -= infil;
+      Aq[k] = Math.min(AQ_MAX, Aq[k] + infil);
+    }
+    if (Aq[k] > 0) {
+      const baseflow = BASEFLOW_RATE * Aq[k] * dt;
+      Aq[k] -= baseflow;
+      W[k] += baseflow;
+    }
+  }
+
+  Wtmp.set(W); Sedtmp.set(Sed); Fmag.fill(0);
+  const reverse = (simStepCount & 1) === 1;
+  if (!reverse) {
+    for (let j = 0; j < N; j++) {
+      const jN = (j+1)%N;
+      const rowC = j*N, rowN = jN*N;
+      for (let i = 0; i < N; i++) {
+        const iE = (i+1)%N, iW = (i-1+N)%N;
+        const a = rowC + i;
+        waterPairBiased(a, rowC + iE, dt, 0, 1);
+        waterPairBiased(a, rowN + i,  dt, 2, 3);
+        waterPairBiased(a, rowN + iE, dt, 4, 7);
+        waterPairBiased(a, rowN + iW, dt, 5, 6);
+      }
+    }
+  } else {
+    for (let j = N-1; j >= 0; j--) {
+      const jS = (j-1+N)%N;
+      const rowC = j*N, rowS = jS*N;
+      for (let i = N-1; i >= 0; i--) {
+        const iW = (i-1+N)%N, iE = (i+1)%N;
+        const a = rowC + i;
+        waterPairBiased(a, rowC + iW, dt, 1, 0);
+        waterPairBiased(a, rowS + i,  dt, 3, 2);
+        waterPairBiased(a, rowS + iW, dt, 7, 4);
+        waterPairBiased(a, rowS + iE, dt, 6, 5);
+      }
+    }
+  }
+  W.set(Wtmp); Sed.set(Sedtmp);
+
+  if (simStepCount % AQ_FLOW_INTERVAL === 0) {
+    const aqDt = dt * AQ_FLOW_INTERVAL;
+    Aqtmp.set(Aq);
+    const reverseAQ = (simStepCount & 1) === 1;
+    if (!reverseAQ) {
+      for (let j = 0; j < N; j++) {
+        const jN = (j+1)%N;
+        const rowC = j*N, rowN = jN*N;
+        for (let i = 0; i < N; i++) {
+          const iE = (i+1)%N, iW = (i-1+N)%N;
+          const a = rowC + i;
+          aqPair(a, rowC + iE, aqDt, 0, 1);
+          aqPair(a, rowN + i,  aqDt, 2, 3);
+          aqPair(a, rowN + iE, aqDt, 4, 7);
+          aqPair(a, rowN + iW, aqDt, 5, 6);
+        }
+      }
+    } else {
+      for (let j = N-1; j >= 0; j--) {
+        const jS = (j-1+N)%N;
+        const rowC = j*N, rowS = jS*N;
+        for (let i = N-1; i >= 0; i--) {
+          const iW = (i-1+N)%N, iE = (i+1)%N;
+          const a = rowC + i;
+          aqPair(a, rowC + iW, aqDt, 1, 0);
+          aqPair(a, rowS + i,  aqDt, 3, 2);
+          aqPair(a, rowS + iW, aqDt, 7, 4);
+          aqPair(a, rowS + iE, aqDt, 6, 5);
+        }
+      }
+    }
+    Aq.set(Aqtmp);
+    for (let k = 0; k < N*N; k++) {
+      const surface = H1[k]+H2[k]+H3[k]+H4[k];
+      if (surface < seaLevel) Aq[k] = 0;
+      if (Aq[k] < 0) Aq[k] = 0;
+      if (Aq[k] > AQ_MAX) Aq[k] = AQ_MAX;
+    }
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const i = k % N, j = (k / N) | 0;
+    const iE = (i+1)%N, iW = (i-1+N)%N;
+    const jN = (j+1)%N, jS = (j-1+N)%N;
+    const g = kk => H1[kk]+H2[kk]+H3[kk]+H4[kk];
+    const dhdx = (g(j*N+iE) - g(j*N+iW)) / (2*cellSize);
+    const dhdz = (g(jN*N+i) - g(jS*N+i)) / (2*cellSize);
+    const slope = Math.hypot(dhdx, dhdz);
+    const slopeFactor = smoothstep(0.02, 0.35, slope);
+    const upstreamTerm = Math.sqrt(flowAccumRouting[k]) * K_DRAIN_ROUTING;
+    const cap = K_CAP * (Fmag[k] + upstreamTerm) * (0.10 + 0.90 * slopeFactor);
+    const s = Sed[k];
+    if (cap > s) {
+      const riverErode = K_RIVER_ERODE *
+        Math.min(1, Math.log(1 + flowAccumRouting[k]) / Math.log(1 + 300)) * dt;
+      let amount = (cap - s) * K_ERODE * (0.3 + 0.7 * slopeFactor) * dt + riverErode;
+      if (amount > MAX_ERODE) amount = MAX_ERODE;
+      if (amount > 0) {
+        let rem = amount;
+        const e1 = Math.min(H1[k], rem); H1[k] -= e1; rem -= e1;
+        const e2 = Math.min(H2[k], rem); H2[k] -= e2; rem -= e2;
+        const e3 = Math.min(H3[k], rem); H3[k] -= e3; rem -= e3;
+        const e4 = rem * K_ERODE_ROCK;
+        H4[k] -= e4;
+        Sed[k] += e1 + e2 + e3 + e4;
+      }
+    } else if (s > cap) {
+      let dep = (s - cap) * K_DEPOSIT * (0.5 + 2.0 * (1 - slopeFactor)) * dt;
+      if (dep > s) dep = s;
+      if (dep > 0) { H1[k] += dep; Sed[k] -= dep; }
+    }
+  }
+
+  const ev = Math.max(0, 1 - EVAP * dt);
+  for (let k = 0; k < N*N; k++) {
+    W[k] *= ev;
+    if (W[k] < 1e-5) { W[k] = 0; Sed[k] = 0; }
+  }
+
+  for (let k = 0; k < N*N; k++) {
+    const surface = H1[k]+H2[k]+H3[k]+H4[k];
+    if (surface < seaLevel) {
+      W[k] = seaLevel - surface;
+    } else {
+      const lakeTarget = Math.max(0, spillLevel[k] - surface);
+      if (lakeTarget > 0.1) {
+        if (W[k] < lakeTarget) {
+          W[k] = Math.min(lakeTarget, W[k] + LAKE_FILL_RATE * dt);
+        } else if (W[k] > lakeTarget + 0.05) {
+          W[k] = Math.max(lakeTarget, W[k] - LAKE_DRAIN_RATE * dt);
+        }
+      }
+    }
+  }
+
+  let violated = 0;
+  for (let k = 0; k < N*N; k++) {
+    if (H1[k] < 0) { H1[k] = 0; violated++; }
+    if (H2[k] < 0) { H2[k] = 0; violated++; }
+    if (H3[k] < 0) { H3[k] = 0; violated++; }
+    if (W[k]  < 0) { W[k]  = 0; violated++; }
+    if (Sed[k] < 0) { Sed[k] = 0; violated++; }
+    if (windSed[k] < 0) { windSed[k] = 0; violated++; }
+    if (!isFinite(H4[k])) { H4[k] = 0; violated++; }
+    if (snowLayer[k] < 0) snowLayer[k] = 0;
+    if (iceLayer[k] < 0) iceLayer[k] = 0;
+    if (Aq[k] < 0) Aq[k] = 0;
+    if (Aq[k] > AQ_MAX) Aq[k] = AQ_MAX;
+    if (lavaBonus[k] < 0) lavaBonus[k] = 0;
+  }
+  simClampViolations += violated;
+}
+
+const texHBuf   = new Float32Array(N*N*4);
+const texWBuf   = new Float32Array(N*N*2);
+const texAuxBuf = new Float32Array(N*N*4);
+const texVolBuf = new Float32Array(N*N*4);
+const texManBuf = new Float32Array(N*N);
+const texAqBuf  = new Float32Array(N*N);
+
+const texH = new THREE.DataTexture(texHBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
+texH.minFilter = THREE.LinearFilter; texH.magFilter = THREE.LinearFilter;
+texH.wrapS = THREE.RepeatWrapping;   texH.wrapT = THREE.RepeatWrapping;
+texH.needsUpdate = true;
+
+const texW = new THREE.DataTexture(texWBuf, N, N, THREE.RGFormat, THREE.FloatType);
+texW.minFilter = THREE.LinearFilter; texW.magFilter = THREE.LinearFilter;
+texW.wrapS = THREE.RepeatWrapping;   texW.wrapT = THREE.RepeatWrapping;
+texW.needsUpdate = true;
+
+const texAux = new THREE.DataTexture(texAuxBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
+texAux.minFilter = THREE.LinearFilter; texAux.magFilter = THREE.LinearFilter;
+texAux.wrapS = THREE.RepeatWrapping;   texAux.wrapT = THREE.RepeatWrapping;
+texAux.needsUpdate = true;
+
+const texVol = new THREE.DataTexture(texVolBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
+texVol.minFilter = THREE.LinearFilter; texVol.magFilter = THREE.LinearFilter;
+texVol.wrapS = THREE.RepeatWrapping;   texVol.wrapT = THREE.RepeatWrapping;
+texVol.needsUpdate = true;
+
+const texMantle = new THREE.DataTexture(texManBuf, N, N, THREE.RedFormat, THREE.FloatType);
+texMantle.minFilter = THREE.LinearFilter; texMantle.magFilter = THREE.LinearFilter;
+texMantle.wrapS = THREE.RepeatWrapping;   texMantle.wrapT = THREE.RepeatWrapping;
+texMantle.needsUpdate = true;
+
+const texAq = new THREE.DataTexture(texAqBuf, N, N, THREE.RedFormat, THREE.FloatType);
+texAq.minFilter = THREE.LinearFilter; texAq.magFilter = THREE.LinearFilter;
+texAq.wrapS = THREE.RepeatWrapping;   texAq.wrapT = THREE.RepeatWrapping;
+texAq.needsUpdate = true;
+
+function syncTextures() {
+  for (let k = 0; k < N*N; k++) {
+    const k4 = k*4, k2 = k*2;
+    texHBuf[k4    ] = H1[k];
+    texHBuf[k4 + 1] = H2[k];
+    texHBuf[k4 + 2] = H3[k];
+    texHBuf[k4 + 3] = H4[k];
+    texAuxBuf[k4    ] = Sed[k];
+    texAuxBuf[k4 + 1] = windSed[k];
+    texAuxBuf[k4 + 2] = Math.min(1.5, Math.log(1 + flowAccumRouting[k]) * 0.25);
+    texAuxBuf[k4 + 3] = humidity[k];
+    texWBuf[k2    ] = W[k];
+    texWBuf[k2 + 1] = temperature[k];
+    texVolBuf[k4    ] = eruptHeat[k];
+    texVolBuf[k4 + 1] = Math.min(1, ashLayer[k] / ASH_LAYER_MAX);
+    texVolBuf[k4 + 2] = iceLayer[k];
+    texVolBuf[k4 + 3] = snowLayer[k];
+    texManBuf[k] = mantleField[k];
+    texAqBuf[k] = Aq[k];
+  }
+  texH.needsUpdate = true;
+  texW.needsUpdate = true;
+  texAux.needsUpdate = true;
+  texVol.needsUpdate = true;
+  texMantle.needsUpdate = true;
+  texAq.needsUpdate = true;
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const skyColor = new THREE.Color(0x8fadc9);
+const scene = new THREE.Scene();
+scene.background = skyColor;
+scene.fog = new THREE.Fog(skyColor, L*0.15, L*0.55);
+
+const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.1, L*2);
+scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x3a2a18, 0.9));
+const sun = new THREE.DirectionalLight(0xfff0d0, 1.4);
+const sunDir = new THREE.Vector3(0.6, 1.0, 0.3).normalize();
+sun.position.copy(sunDir).multiplyScalar(200);
+scene.add(sun);
+
+function buildGridGeometry() {
+  const geo = new THREE.BufferGeometry();
+  const V = NV1 * NV1;
+  const verts = new Float32Array(V * 3);
+  const uvs   = new Float32Array(V * 2);
+  const step = L / NV;
+  for (let j = 0; j < NV1; j++) {
+    const jV = j * NV1;
+    const uj = j / NV;
+    const z = j * step;
+    for (let i = 0; i < NV1; i++) {
+      const vi = jV + i;
+      verts[vi*3    ] = i * step;
+      verts[vi*3 + 1] = 0;
+      verts[vi*3 + 2] = z;
+      uvs[vi*2    ] = i / NV;
+      uvs[vi*2 + 1] = uj;
+    }
+  }
+  const totalTri = NV * NV * 2;
+  const idx = new Uint32Array(totalTri * 3);
+  let p = 0;
+  for (let j = 0; j < NV; j++) {
+    const jV = j * NV1, jVn = (j + 1) * NV1;
+    for (let i = 0; i < NV; i++) {
+      const a = jV + i, b = a + 1, c = jVn + i, d = c + 1;
+      idx[p++] = a; idx[p++] = c; idx[p++] = b;
+      idx[p++] = b; idx[p++] = c; idx[p++] = d;
+    }
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.setAttribute('uv',       new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+  geo.boundingSphere.radius += 200;
+  return geo;
+}
+
+const terrainGeo = buildGridGeometry();
+
+const commonVS = `
+  uniform sampler2D texH;
+  uniform sampler2D texW;
+  uniform sampler2D texAux;
+  uniform sampler2D texVol;
+  uniform sampler2D texMantle;
+  uniform sampler2D texAq;
+  uniform vec2 uTexel;
+  uniform float uCellSize;
+  uniform float uWaterMix;
+  uniform float uSeaLevel;
+
+  varying vec3  vWorld;
+  varying vec3  vNormalW;
+  varying float vH;
+  varying float vH1;
+  varying float vW;
+  varying float vSed;
+  varying float vWind;
+  varying float vDrainage;
+  varying float vTemp;
+  varying float vHum;
+  varying float vHeat;
+  varying float vAsh;
+  varying float vIce;
+  varying float vSnow;
+  varying float vMantle;
+  varying float vAq;
+
+  void main() {
+    vec2 uvc = uv;
+    vec4 h4  = texture2D(texH, uvc);
+    vec2 wt  = texture2D(texW, uvc).rg;
+    vec4 aux = texture2D(texAux, uvc);
+    vec4 vol = texture2D(texVol, uvc);
+    float mantle = texture2D(texMantle, uvc).r;
+    float aq = texture2D(texAq, uvc).r;
+
+    float w   = wt.r;
+    float t   = wt.g;
+    float ice = vol.b;
+    float snow= vol.a;
+
+    float surface = h4.x + h4.y + h4.z + h4.w;
+
+    vec3 pos = position;
+    if (uWaterMix < 0.5) {
+      float snowOnLand = surface > uSeaLevel ? snow : 0.0;
+      pos.y = surface + snowOnLand;
+    } else {
+      float hasIce = step(0.02, ice);
+      pos.y = uSeaLevel + hasIce * (0.08 * ice + snow);
+    }
+
+    float e = uTexel.x;
+    vec4 hL = texture2D(texH, uvc - vec2(e, 0.0));
+    vec4 hR = texture2D(texH, uvc + vec2(e, 0.0));
+    vec4 hD = texture2D(texH, uvc - vec2(0.0, e));
+    vec4 hU = texture2D(texH, uvc + vec2(0.0, e));
+    float hLsum = hL.x+hL.y+hL.z+hL.w;
+    float hRsum = hR.x+hR.y+hR.z+hR.w;
+    float hDsum = hD.x+hD.y+hD.z+hD.w;
+    float hUsum = hU.x+hU.y+hU.z+hU.w;
+
+    float dHdx = (hRsum - hLsum) / (2.0 * uCellSize);
+    float dHdz = (hUsum - hDsum) / (2.0 * uCellSize);
+    vec3 nrm = normalize(vec3(-dHdx, 1.0, -dHdz));
+
+    vec4 world = modelMatrix * vec4(pos, 1.0);
+    vWorld   = world.xyz;
+    vNormalW = normalize(mat3(modelMatrix) * nrm);
+    vH   = surface;
+    vH1  = h4.x;
+    vW   = w;
+    vSed = aux.x;
+    vWind = aux.y;
+    vDrainage = aux.z;
+    vTemp = t;
+    vHum = aux.w;
+    vHeat = vol.r;
+    vAsh = vol.g;
+    vIce = ice;
+    vSnow = snow;
+    vMantle = mantle;
+    vAq = aq;
+
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+
+const terrainFS = `
+  uniform vec3  uLightDir;
+  uniform vec3  uAmbient;
+  uniform vec3  uSunColor;
+  uniform int   uOverlayMode;
+
+  varying vec3  vWorld;
+  varying vec3  vNormalW;
+  varying float vH;
+  varying float vH1;
+  varying float vW;
+  varying float vWind;
+  varying float vDrainage;
+  varying float vTemp;
+  varying float vHum;
+  varying float vHeat;
+  varying float vAsh;
+  varying float vIce;
+  varying float vSnow;
+  varying float vMantle;
+  varying float vAq;
+
+  vec3 biomeColor(float t, float h) {
+    vec3 ice     = vec3(0.92, 0.95, 1.00);
+    vec3 tundra  = vec3(0.62, 0.65, 0.60);
+    vec3 taiga   = vec3(0.22, 0.38, 0.25);
+    vec3 steppe  = vec3(0.72, 0.68, 0.42);
+    vec3 forest  = vec3(0.18, 0.42, 0.18);
+    vec3 desert  = vec3(0.90, 0.80, 0.52);
+    vec3 savanna = vec3(0.62, 0.62, 0.32);
+    vec3 jungle  = vec3(0.12, 0.45, 0.08);
+    vec3 coldCol, tempCol, hotCol;
+    if (h < 0.30)      coldCol = mix(tundra, ice,    (0.30 - h) / 0.30);
+    else if (h < 0.70) coldCol = mix(tundra, taiga,  (h - 0.30) / 0.40);
+    else               coldCol = taiga;
+    if (h < 0.30)      tempCol = steppe;
+    else if (h < 0.70) tempCol = mix(steppe, forest, (h - 0.30) / 0.40);
+    else               tempCol = forest;
+    if (h < 0.30)      hotCol = desert;
+    else if (h < 0.70) hotCol = mix(desert, jungle,  (h - 0.30) / 0.40);
+    else               hotCol = jungle;
+    if (t < 0.30) return mix(coldCol, tempCol, t / 0.30);
+    if (t < 0.60) return mix(tempCol, hotCol, (t - 0.30) / 0.30);
+    return hotCol;
+  }
+  vec3 heightColor(float h) {
+    float t = clamp((h + 60.0) / 140.0, 0.0, 1.0);
+    vec3 blue  = vec3(0.10, 0.25, 0.55);
+    vec3 cyan  = vec3(0.20, 0.70, 0.80);
+    vec3 green = vec3(0.15, 0.60, 0.20);
+    vec3 yel   = vec3(0.85, 0.85, 0.20);
+    vec3 red   = vec3(0.85, 0.20, 0.10);
+    vec3 white = vec3(1.0, 1.0, 1.0);
+    if (t < 0.20) return mix(blue,  cyan,  t / 0.20);
+    if (t < 0.45) return mix(cyan,  green, (t - 0.20) / 0.25);
+    if (t < 0.70) return mix(green, yel,   (t - 0.45) / 0.25);
+    if (t < 0.90) return mix(yel,   red,   (t - 0.70) / 0.20);
+    return mix(red, white, (t - 0.90) / 0.10);
+  }
+  vec3 tempColor(float t) {
+    vec3 cold = vec3(0.10, 0.30, 0.85);
+    vec3 warm = vec3(0.95, 0.95, 0.20);
+    vec3 hot  = vec3(0.85, 0.10, 0.05);
+    if (t < 0.5) return mix(cold, warm, t * 2.0);
+    return mix(warm, hot, (t - 0.5) * 2.0);
+  }
+  vec3 humColor(float h) {
+    vec3 dry = vec3(0.85, 0.65, 0.30);
+    vec3 wet = vec3(0.15, 0.45, 0.85);
+    return mix(dry, wet, h);
+  }
+  vec3 drainColor(float d) {
+    float v = clamp(d * 1.5, 0.0, 1.0);
+    return mix(vec3(0.15, 0.15, 0.15), vec3(0.20, 0.80, 0.95), v);
+  }
+  vec3 snowColor(float s) {
+    return mix(vec3(0.20, 0.25, 0.35), vec3(1.0, 1.0, 1.0), clamp(s / 1.5, 0.0, 1.0));
+  }
+  vec3 iceColor(float i) {
+    return mix(vec3(0.10, 0.15, 0.30), vec3(0.55, 0.85, 1.0), clamp(i / 2.0, 0.0, 1.0));
+  }
+  vec3 mantleColor(float m) {
+    float v = clamp(m * 1.5 + 0.5, 0.0, 1.0);
+    vec3 neg = vec3(0.20, 0.40, 0.85);
+    vec3 mid = vec3(0.20, 0.20, 0.20);
+    vec3 pos = vec3(0.95, 0.35, 0.15);
+    if (v < 0.5) return mix(neg, mid, v * 2.0);
+    return mix(mid, pos, (v - 0.5) * 2.0);
+  }
+  vec3 aqColor(float a) {
+    float v = clamp(a / 0.5, 0.0, 1.0);
+    vec3 dry = vec3(0.55, 0.42, 0.25);
+    vec3 wet = vec3(0.15, 0.65, 0.85);
+    return mix(dry, wet, v);
+  }
+
+  void main() {
+    vec3 col;
+
+    if (uOverlayMode == 0) {
+      col = biomeColor(vTemp, vHum);
+      if (vSnow > 0.05) {
+        float snowAmt = smoothstep(0.05, 1.0, vSnow);
+        col = mix(col, vec3(0.95, 0.97, 1.0), snowAmt);
+      } else if (vTemp < 0.22) {
+        col = mix(col, vec3(0.95, 0.97, 1.0), smoothstep(0.22, 0.08, vTemp));
+      }
+      float drain = clamp(vDrainage * 1.8, 0.0, 1.0);
+      vec3 riverColor = vec3(0.15, 0.35, 0.55);
+      col = mix(col, col * 0.65, drain * 0.6);
+      col = mix(col, riverColor, drain * drain * 0.45);
+      float slope = 1.0 - normalize(vNormalW).y;
+      col = mix(col, vec3(0.42, 0.38, 0.34), smoothstep(0.30, 0.70, slope) * 0.65);
+      if (vH1 < 0.3) col = mix(col, vec3(0.42, 0.38, 0.34),
+                               smoothstep(0.3, 0.05, vH1) * 0.65);
+      if (vAsh > 0.02) col = mix(col, vec3(0.28, 0.25, 0.22), vAsh * 0.7);
+      float dust = min(1.0, vWind * 60.0);
+      if (dust > 0.02) col = mix(col, vec3(0.78, 0.66, 0.42), dust * 0.25);
+    } else if (uOverlayMode == 1) col = heightColor(vH);
+    else if (uOverlayMode == 2) col = tempColor(vTemp);
+    else if (uOverlayMode == 3) col = humColor(vHum);
+    else if (uOverlayMode == 4) col = drainColor(vDrainage);
+    else if (uOverlayMode == 5) col = snowColor(vSnow);
+    else if (uOverlayMode == 6) col = iceColor(vIce);
+    else if (uOverlayMode == 7) col = mantleColor(vMantle);
+    else col = aqColor(vAq);
+
+    vec3 N = normalize(vNormalW);
+    if (!gl_FrontFacing) N = -N;
+    vec3 L = normalize(uLightDir);
+    float diff = max(dot(N, L), 0.0);
+    float lightFactor = (uOverlayMode == 0) ? 1.0 : 0.55;
+    vec3 colOut = col * (uAmbient * lightFactor + uSunColor * diff * lightFactor + (1.0 - lightFactor) * 0.5);
+
+    if (uOverlayMode == 0 && vHeat > 0.02) {
+      vec3 lava = vec3(1.0, 0.35, 0.05);
+      colOut = mix(colOut, lava, vHeat * 0.8);
+      colOut += vec3(1.0, 0.45, 0.1) * vHeat * vHeat * 1.5;
+    }
+
+    gl_FragColor = vec4(colOut, 1.0);
+  }
+`;
+
+const waterFS = `
+  uniform vec3  uLightDir;
+  uniform vec3  uAmbient;
+  uniform vec3  uSunColor;
+  uniform vec3  uCamera;
+  uniform int   uOverlayMode;
+  varying vec3  vWorld;
+  varying vec3  vNormalW;
+  varying float vW;
+  varying float vSed;
+  varying float vTemp;
+  varying float vHeat;
+  varying float vIce;
+  varying float vSnow;
+  varying float vH;
+  varying float vDrainage;
+  varying float vHum;
+  varying float vAq;
+
+  void main() {
+    if (vW < 0.0003 && vIce < 0.02) discard;
+    vec3 N = normalize(vNormalW);
+    if (!gl_FrontFacing) N = -N;
+    vec3 L = normalize(uLightDir);
+    vec3 V = normalize(uCamera - vWorld);
+    vec3 Hv = normalize(L + V);
+    float diff = max(dot(N, L), 0.0);
+
+    if (uOverlayMode != 0) {
+      vec3 col;
+      if (uOverlayMode == 1) {
+        float t = clamp((vH + 60.0) / 140.0, 0.0, 1.0);
+        col = mix(vec3(0.10, 0.25, 0.55), vec3(0.20, 0.70, 0.80), t);
+      } else if (uOverlayMode == 2) col = mix(vec3(0.10, 0.30, 0.85), vec3(0.95, 0.95, 0.20), vTemp);
+      else if (uOverlayMode == 3) col = mix(vec3(0.85, 0.65, 0.30), vec3(0.15, 0.45, 0.85), vHum);
+      else if (uOverlayMode == 4) col = mix(vec3(0.15), vec3(0.20, 0.80, 0.95), clamp(vDrainage * 1.5, 0.0, 1.0));
+      else if (uOverlayMode == 5) col = mix(vec3(0.20, 0.25, 0.35), vec3(1.0), clamp(vSnow / 1.5, 0.0, 1.0));
+      else if (uOverlayMode == 6) col = mix(vec3(0.10, 0.15, 0.30), vec3(0.55, 0.85, 1.0), clamp(vIce / 2.0, 0.0, 1.0));
+      else if (uOverlayMode == 8) col = mix(vec3(0.55, 0.42, 0.25), vec3(0.15, 0.65, 0.85), clamp(vAq / 0.5, 0.0, 1.0));
+      else col = vec3(0.2);
+      gl_FragColor = vec4(col * (0.5 + diff * 0.3), 0.75);
+      return;
+    }
+
+    if (vIce > 0.02) {
+      vec3 iceCol = mix(vec3(0.82, 0.90, 1.0), vec3(0.94, 0.96, 1.0),
+                        clamp(vIce * 0.3, 0.0, 1.0));
+      if (vSnow > 0.02) iceCol = mix(iceCol, vec3(0.98, 0.99, 1.0), clamp(vSnow, 0.0, 1.0));
+      float spec = pow(max(dot(N, Hv), 0.0), 120.0);
+      vec3 colOut = iceCol * (uAmbient + uSunColor * diff);
+      colOut += vec3(0.85, 0.92, 1.0) * spec * 0.7;
+      if (vHeat > 0.02) colOut = mix(colOut, vec3(0.7, 0.35, 0.25), vHeat * 0.5);
+      gl_FragColor = vec4(colOut, 1.0);
+      return;
+    }
+
+    float d = clamp(vW * 4.0, 0.0, 1.0);
+    vec3 base = mix(vec3(0.29, 0.62, 0.81), vec3(0.04, 0.15, 0.25), d);
+    if (vTemp < 0.12) base = mix(base, vec3(0.88, 0.94, 1.0), smoothstep(0.12, 0.02, vTemp));
+    if (vHeat > 0.02) base = mix(base, vec3(0.7, 0.35, 0.25), vHeat * 0.5);
+    float turb = clamp(vSed / max(vW, 0.001) * 3.0, 0.0, 1.0);
+    base = mix(base, vec3(0.37, 0.29, 0.18), turb * 0.4);
+    float spec = pow(max(dot(N, Hv), 0.0), 140.0);
+    vec3 col = base * (uAmbient * 0.7 + uSunColor * diff);
+    col += vec3(0.81, 0.89, 1.0) * spec * 0.9;
+    float alpha = clamp(sqrt(vW * 2.0), 0.0, 0.85);
+    alpha = max(alpha, clamp(vW * 25.0, 0.0, 0.85));
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+const terrainMat = new THREE.ShaderMaterial({
+  uniforms: {
+    texH:      { value: texH },
+    texW:      { value: texW },
+    texAux:    { value: texAux },
+    texVol:    { value: texVol },
+    texMantle: { value: texMantle },
+    texAq:     { value: texAq },
+    uTexel:    { value: new THREE.Vector2(1/N, 1/N) },
+    uCellSize: { value: cellSize },
+    uWaterMix: { value: 0.0 },
+    uSeaLevel: { value: 0.0 },
+    uOverlayMode: { value: 0 },
+    uLightDir: { value: sunDir.clone() },
+    uAmbient:  { value: new THREE.Color(0x405a80) },
+    uSunColor: { value: new THREE.Color(0xfff0d0) },
+  },
+  vertexShader: commonVS,
+  fragmentShader: terrainFS,
+});
+
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: {
+    texH:      { value: texH },
+    texW:      { value: texW },
+    texAux:    { value: texAux },
+    texVol:    { value: texVol },
+    texMantle: { value: texMantle },
+    texAq:     { value: texAq },
+    uTexel:    { value: new THREE.Vector2(1/N, 1/N) },
+    uCellSize: { value: cellSize },
+    uWaterMix: { value: 1.0 },
+    uSeaLevel: { value: 0.0 },
+    uOverlayMode: { value: 0 },
+    uLightDir: { value: sunDir.clone() },
+    uAmbient:  { value: new THREE.Color(0x405a80) },
+    uSunColor: { value: new THREE.Color(0xfff0d0) },
+    uCamera:   { value: new THREE.Vector3() },
+  },
+  vertexShader: commonVS,
+  fragmentShader: waterFS,
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+const terrainTiles = [], waterTiles = [];
+for (let i = -1; i <= 1; i++) {
+  for (let j = -1; j <= 1; j++) {
+    const mt = new THREE.Mesh(terrainGeo, terrainMat);
+    mt.matrixAutoUpdate = false; mt.frustumCulled = false;
+    scene.add(mt); terrainTiles.push({ mesh: mt, i, j });
+
+    const mw = new THREE.Mesh(terrainGeo, waterMat);
+    mw.matrixAutoUpdate = false; mw.frustumCulled = false;
+    mw.renderOrder = 1;
+    scene.add(mw); waterTiles.push({ mesh: mw, i, j });
+  }
+}
+
+const EYE = 1.7, GRAVITY = 24, JUMP_V = 9;
+const SPEED_WALK = 9, SPEED_RUN = 16;
+const player = { x: L*0.5, z: L*0.5, yaw: 0, pitch: 0, vy: 0, onGround: true };
+let feetY = 0, paused = false;
+
+const keys = Object.create(null);
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'KeyP') paused = !paused;
+  if (e.code === 'KeyR') resetTerrain(false);
+  if (e.code === 'KeyG') resetTerrain(true);
+  if (e.code === 'KeyT') rainEnabled = !rainEnabled;
+  if (e.code === 'KeyB') windEnabled = !windEnabled;
+  if (e.code === 'KeyI') iceEnabled  = !iceEnabled;
+  if (e.code === 'KeyV') volcanoesEnabled = !volcanoesEnabled;
+  if (e.code === 'KeyL') {
+    overlayMode = (overlayMode + 1) % OVERLAY_COUNT;
+    terrainMat.uniforms.uOverlayMode.value = overlayMode;
+    waterMat.uniforms.uOverlayMode.value = overlayMode;
+  }
+  if (e.code === 'KeyX') {
+    showSlice = !showSlice;
+    sliceCanvas.style.display = showSlice ? 'block' : 'none';
+  }
+  if (e.code === 'KeyY') {
+    showGraphs = !showGraphs;
+    graphCanvas.style.display = showGraphs ? 'block' : 'none';
+  }
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+const startScreen = document.getElementById('start');
+startScreen.addEventListener('click', () => renderer.domElement.requestPointerLock());
+renderer.domElement.addEventListener('click', () => {
+  if (document.pointerLockElement !== renderer.domElement)
+    renderer.domElement.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', () => {
+  startScreen.style.display = document.pointerLockElement ? 'none' : 'grid';
+});
+document.addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  player.yaw   -= e.movementX * 0.0022;
+  player.pitch -= e.movementY * 0.0022;
+  const lim = Math.PI/2 - 0.01;
+  player.pitch = Math.max(-lim, Math.min(lim, player.pitch));
+});
+
+function renderSlice() {
+  const Wc = sliceCanvas.width, Hc = sliceCanvas.height;
+  sliceCtx.fillStyle = 'rgba(0,0,0,0.75)';
+  sliceCtx.fillRect(0, 0, Wc, Hc);
+  const pj = Math.floor(wrap(player.z) / cellSize) % N;
+  const baseY = -60, topY = 80;
+  const scaleY = Hc / (topY - baseY);
+  const stepX = Wc / N;
+  const ySea = Hc - (seaLevel - baseY) * scaleY;
+  sliceCtx.strokeStyle = 'rgba(100,180,255,0.7)';
+  sliceCtx.beginPath(); sliceCtx.moveTo(0, ySea); sliceCtx.lineTo(Wc, ySea); sliceCtx.stroke();
+  for (let i = 0; i < N; i++) {
+    const k = pj * N + i;
+    const s = H1[k]+H2[k]+H3[k]+H4[k];
+    const h1 = H1[k], h2 = H2[k], h3 = H3[k], h4 = Math.max(0, H4[k]);
+    const sn = snowLayer[k], ic = iceLayer[k];
+    const ySurface = Hc - (s - baseY) * scaleY;
+    const y1 = ySurface + h1 * scaleY;
+    const y2 = y1 + h2 * scaleY;
+    const y3 = y2 + h3 * scaleY;
+    const y4 = y3 + h4 * scaleY;
+    sliceCtx.fillStyle = '#4a7a3a';
+    sliceCtx.fillRect(i * stepX, ySurface, stepX, Math.max(0, h1 * scaleY));
+    sliceCtx.fillStyle = '#9a8a6a';
+    sliceCtx.fillRect(i * stepX, y1, stepX, Math.max(0, h2 * scaleY));
+    sliceCtx.fillStyle = '#7a7065';
+    sliceCtx.fillRect(i * stepX, y2, stepX, Math.max(0, h3 * scaleY));
+    sliceCtx.fillStyle = '#4a4038';
+    sliceCtx.fillRect(i * stepX, y3, stepX, Math.max(0, h4 * scaleY));
+    if (ic > 0.05 && s < seaLevel) {
+      const iceTop = seaLevel + 0.08 * ic + sn;
+      const iceBot = seaLevel - 0.92 * ic;
+      const yIT = Hc - (iceTop - baseY) * scaleY;
+      const yIB = Hc - (iceBot - baseY) * scaleY;
+      sliceCtx.fillStyle = 'rgba(180, 220, 255, 0.92)';
+      sliceCtx.fillRect(i * stepX, yIT, stepX, Math.max(0, yIB - yIT));
+    }
+    if (W[k] > 0.005) {
+      const yWT = Hc - (seaLevel - baseY) * scaleY;
+      const yWB = Hc - (seaLevel - W[k] - baseY) * scaleY;
+      sliceCtx.fillStyle = 'rgba(60, 130, 200, 0.85)';
+      sliceCtx.fillRect(i * stepX, yWT, stepX, Math.max(1, yWB - yWT));
+    }
+    if (sn > 0.01 && s >= seaLevel) {
+      const ySnowTop = ySurface - sn * scaleY;
+      sliceCtx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      sliceCtx.fillRect(i * stepX, ySnowTop, stepX, Math.max(0, sn * scaleY));
+    }
+    if (Aq[k] > 0.05 && s >= seaLevel) {
+      sliceCtx.fillStyle = 'rgba(80, 200, 230, 0.55)';
+      sliceCtx.fillRect(i * stepX, ySurface, stepX, Math.max(1, Aq[k] * scaleY * 0.5));
+    }
+    if (lavaBonus[k] > 0.2) {
+      sliceCtx.fillStyle = 'rgba(220, 80, 40, 0.7)';
+      sliceCtx.fillRect(i * stepX, ySurface - 2, stepX, 2);
+    }
+  }
+  sliceCtx.fillStyle = '#cfe';
+  sliceCtx.font = '11px monospace';
+  sliceCtx.fillText(`Разрез по X на z=${player.z.toFixed(1)} м  (диапазон −60..+80 м)`, 8, 14);
+  const items = [
+    { c: '#4a7a3a', t: 'H1' }, { c: '#9a8a6a', t: 'H2' },
+    { c: '#7a7065', t: 'H3' }, { c: '#4a4038', t: 'H4' },
+    { c: 'rgba(180,220,255,0.92)', t: 'лёд' },
+    { c: 'rgba(60,130,200,0.85)', t: 'вода' },
+    { c: 'rgba(255,255,255,0.95)', t: 'снег' },
+    { c: 'rgba(80,200,230,0.55)', t: 'Aq' },
+    { c: 'rgba(220,80,40,0.7)', t: 'лава' },
+  ];
+  let xPos = 8;
+  for (const it of items) {
+    sliceCtx.fillStyle = it.c;
+    sliceCtx.fillRect(xPos, Hc - 16, 10, 10);
+    sliceCtx.fillStyle = '#aaa';
+    sliceCtx.fillText(it.t, xPos + 14, Hc - 7);
+    xPos += 14 + sliceCtx.measureText(it.t).width + 10;
+  }
+}
+
+function renderGraphs() {
+  const Wc = graphCanvas.width, Hc = graphCanvas.height;
+  graphCtx.fillStyle = 'rgba(0,0,0,0.75)';
+  graphCtx.fillRect(0, 0, Wc, Hc);
+  graphCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  for (let x = 0; x <= 4; x++) {
+    graphCtx.beginPath(); graphCtx.moveTo(x*Wc/4, 0); graphCtx.lineTo(x*Wc/4, Hc); graphCtx.stroke();
+  }
+  for (let y = 0; y <= 4; y++) {
+    graphCtx.beginPath(); graphCtx.moveTo(0, y*Hc/4); graphCtx.lineTo(Wc, y*Hc/4); graphCtx.stroke();
+  }
+  const n = histCount;
+  if (n < 2) {
+    graphCtx.fillStyle = '#aaa';
+    graphCtx.font = '12px monospace';
+    graphCtx.fillText('Накапливаю данные...', 10, 20);
+    return;
+  }
+  const H1s = Hc / 2, H2s = Hc / 2;
+  const drawLine = (arr, toY, color) => {
+    graphCtx.strokeStyle = color;
+    graphCtx.lineWidth = 1.8;
+    graphCtx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const idx = (histHead - n + i + HIST_LEN) % HIST_LEN;
+      const x = (i / (HIST_LEN - 1)) * Wc;
+      const y = toY(arr[idx]);
+      if (i === 0) graphCtx.moveTo(x, y); else graphCtx.lineTo(x, y);
+    }
+    graphCtx.stroke();
+  };
+  drawLine(histLand, v => H1s - (v / 100) * H1s * 0.95 - 2, '#7bc47b');
+  drawLine(histSnow, v => H1s - (v / 100) * H1s * 0.95 - 2, '#ffffff');
+  drawLine(histIce,  v => H1s - (v / 100) * H1s * 0.95 - 2, '#7bc4ff');
+  const seaMin = -25, seaMax = 8;
+  drawLine(histSea, v => Hc - ((v - seaMin) / (seaMax - seaMin)) * H2s * 0.95 - 2, '#ff7b7b');
+  drawLine(histPlates, v => Hc - (v / 32) * H2s * 0.5 - 2, '#ffcc66');
+  drawLine(histAq, v => Hc - (v / 2.0) * H2s * 0.4 - 2, '#66d9ff');
+  graphCtx.fillStyle = '#cfe';
+  graphCtx.font = '11px monospace';
+  graphCtx.fillText('5 минут истории', 8, 14);
+  graphCtx.fillText(
+    `${histLand[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(0)}%  суша  ` +
+    `${histSnow[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(0)}%  снег  ` +
+    `${histIce[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(0)}%  лёд`, 8, 28);
+  graphCtx.fillText(
+    `sea: ${histSea[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(1)} м  ` +
+    `плит: ${histPlates[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(0)}  ` +
+    `Aq: ${histAq[(histHead-1+HIST_LEN)%HIST_LEN].toFixed(2)} м`, 8, Hc - 8);
+}
+
+const hud = document.getElementById('hud');
+let last = performance.now(), simAccum = 0;
+const SIM_STEP = 1/30;
+
+setInterval(() => {
+  let landCount = 0, snowCount = 0, iceCount = 0, aqSum = 0;
+  for (let k = 0; k < N*N; k++) {
+    const s = H1[k]+H2[k]+H3[k]+H4[k];
+    if (s > seaLevel) { landCount++; aqSum += Aq[k]; }
+    if (snowLayer[k] > 0.1) snowCount++;
+    if (iceLayer[k] > 0.1) iceCount++;
+  }
+  histLand[histHead]   = landCount / (N*N) * 100;
+  histSnow[histHead]   = snowCount / (N*N) * 100;
+  histIce[histHead]    = iceCount  / (N*N) * 100;
+  histSea[histHead]    = seaLevel;
+  histPlates[histHead] = countActivePlates();
+  histAq[histHead]     = landCount > 0 ? aqSum / landCount : 0;
+  histHead = (histHead + 1) % HIST_LEN;
+  histCount = Math.min(histCount + 1, HIST_LEN);
+}, 1000);
+
+let stats = new Array(16).fill(0);
+setInterval(() => {
+  let mn = Infinity, mx = -Infinity;
+  let s1=0, s2=0, s3=0, s4=0, sw=0, fa=0, faMax=0;
+  let tAvg=0, hAvg=0;
+  let land = 0, snowCells = 0, iceCells = 0, iceTotal = 0, aqSum = 0, aqMax = 0, lavaSum = 0;
+  for (let k = 0; k < N*N; k++) {
+    const h = H1[k]+H2[k]+H3[k]+H4[k];
+    if (h < mn) mn = h; if (h > mx) mx = h;
+    s1 += H1[k]; s2 += H2[k]; s3 += H3[k]; s4 += H4[k];
+    sw += W[k];
+    fa += flowAccumRouting[k];
+    if (flowAccumRouting[k] > faMax) faMax = flowAccumRouting[k];
+    tAvg += temperature[k];
+    hAvg += humidity[k];
+    if (h > seaLevel) { land++; aqSum += Aq[k]; }
+    if (Aq[k] > aqMax) aqMax = Aq[k];
+    if (snowLayer[k] > 0.1) snowCells++;
+    if (iceLayer[k] > 0.1)  { iceCells++; iceTotal += iceLayer[k]; }
+    lavaSum += lavaBonus[k];
+  }
+  const K = N*N;
+  stats = [
+    mn, mx, s1/K, s2/K, s3/K, s4/K, sw/K,
+    land/K*100,
+    snowCells/K*100,
+    fa/K, faMax, tAvg/K, hAvg/K,
+    iceCells/K*100,
+    (iceTotal > 0 ? iceTotal/Math.max(1, iceCells) : 0),
+    (land > 0 ? aqSum/land : 0)
+  ];
+  window.__lavaSum = lavaSum;
+}, 400);
+
+let graphTimer = 0;
+
+resetTerrain(false);
+feetY = sampleHeight(player.x, player.z);
+
+function tick(now) {
+  const dt = Math.min((now - last)/1000, 0.1);
+  last = now;
+
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+  const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+  let dx = 0, dz = 0;
+  if (keys.KeyW || keys.ArrowUp)    { dx += fx; dz += fz; }
+  if (keys.KeyS || keys.ArrowDown)  { dx -= fx; dz -= fz; }
+  if (keys.KeyD || keys.ArrowRight) { dx += rx; dz += rz; }
+  if (keys.KeyA || keys.ArrowLeft)  { dx -= rx; dz -= rz; }
+  const len = Math.hypot(dx, dz);
+  if (len > 0) {
+    dx /= len; dz /= len;
+    const sp = (keys.ShiftLeft || keys.ShiftRight) ? SPEED_RUN : SPEED_WALK;
+    player.x = wrap(player.x + dx*sp*dt);
+    player.z = wrap(player.z + dz*sp*dt);
+  }
+
+  const groundY = sampleHeight(player.x, player.z);
+  if (keys.Space && player.onGround) { player.onGround = false; player.vy = JUMP_V; }
+  if (player.onGround) feetY = groundY;
+  else {
+    player.vy -= GRAVITY*dt; feetY += player.vy*dt;
+    if (feetY <= groundY) { feetY = groundY; player.vy = 0; player.onGround = true; }
+  }
+
+  if (!paused) {
+    simAccum += dt;
+    let steps = 0;
+    while (simAccum >= SIM_STEP && steps < 5) {
+      simulate(SIM_STEP); simAccum -= SIM_STEP; steps++;
+    }
+    if (steps > 0) syncTextures();
+  }
+
+  camera.position.set(0, feetY + EYE, 0);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+
+  for (const t of terrainTiles) {
+    t.mesh.position.set(t.i*L - player.x, 0, t.j*L - player.z);
+    t.mesh.updateMatrix();
+  }
+  for (const t of waterTiles) {
+    t.mesh.position.set(t.i*L - player.x, 0, t.j*L - player.z);
+    t.mesh.updateMatrix();
+  }
+  waterMat.uniforms.uCamera.value.copy(camera.position);
+  waterMat.uniforms.uSeaLevel.value = seaLevel;
+  terrainMat.uniforms.uSeaLevel.value = seaLevel;
+
+  if (showSlice && (simStepCount % 5 === 0)) renderSlice();
+  graphTimer += dt;
+  if (showGraphs && graphTimer > 0.25) {
+    graphTimer = 0;
+    renderGraphs();
+  }
+
+  let biomeName = '—';
+  try {
+    const pi = Math.floor(wrap(player.x) / cellSize) % N;
+    const pj = Math.floor(wrap(player.z) / cellSize) % N;
+    const pk = pj*N + pi;
+    const t = temperature[pk];
+    const h = humidity[pk];
+    const surf = H1[pk]+H2[pk]+H3[pk]+H4[pk];
+    if (surf < seaLevel) {
+      if (iceLayer[pk] > 0.2) biomeName = 'Морской лёд';
+      else biomeName = t < ICE_TEMP ? 'Ледяной океан' : 'Океан';
+    }
+    else if (eruptHeat[pk] > 0.3) biomeName = 'Активный вулкан';
+    else if (lavaBonus[pk] > 0.5) biomeName = 'Лавовое поле';
+    else if (ashLayer[pk] > 0.5) biomeName = 'Пепелище';
+    else if (snowLayer[pk] > 0.3) biomeName = 'Снежное плато';
+    else if (Aq[pk] > 0.7 && W[pk] > 0.05) biomeName = 'Заболоченная низина';
+    else if (t < SNOW_TEMP && h < 0.4) biomeName = 'Тундра';
+    else if (t < SNOW_TEMP) biomeName = 'Полярная пустыня';
+    else if (t < 0.30 && h < 0.4) biomeName = 'Холодная степь';
+    else if (t < 0.30) biomeName = 'Тайга';
+    else if (t < 0.60 && h < 0.30) biomeName = 'Степь';
+    else if (t < 0.60 && h < 0.70) biomeName = 'Умеренный лес';
+    else if (t < 0.60) biomeName = 'Умеренный дождевой лес';
+    else if (h < 0.30) biomeName = 'Пустыня';
+    else if (h < 0.70) biomeName = 'Саванна';
+    else biomeName = 'Тропический лес';
+  } catch (e) { /* ignore */ }
+
+  try {
+    const activePlates = countActivePlates();
+    const lastEruptAgo = lastEruption.t > 0 ? (simTime - lastEruption.t).toFixed(0) : '—';
+    hud.textContent =
+      `x=${player.x.toFixed(1)}  z=${player.z.toFixed(1)}  y=${feetY.toFixed(2)}\n` +
+      `t=${simTime.toFixed(1)}с  ${paused?'ПАУЗА':'идёт'}  seed=${worldSeed}\n` +
+      `биом: ${biomeName}  |  seaLevel=${seaLevel.toFixed(2)} м\n` +
+      `плит: ${activePlates}/${MAX_PLATES}  рожд. ${birthsTotal}  смерт. ${deathsTotal}\n` +
+      `плюмов: ${plumes.length}  извержений: ${eruptionsTotal}  последнее: ${lastEruptAgo}с назад${lastEruption.underwater?' (подводное)':''}\n` +
+      `overlay: ${OVERLAY_NAMES[overlayMode]} (L)  |  разрез: ${showSlice?'вкл':'выкл'} (X)  |  графики: ${showGraphs?'вкл':'выкл'} (Y)\n` +
+      `дрейф ${(DRIFT_INTERVAL/30).toFixed(0)}с  |  суша ${stats[7].toFixed(1)}%  снег ${stats[8].toFixed(1)}%  лёд ${stats[13].toFixed(1)}%\n` +
+      `лёд ср. толщ: ${stats[14].toFixed(2)} м  |  Aq ср.: ${stats[15].toFixed(2)} м\n` +
+      `рельеф ${stats[0].toFixed(1)}…${stats[1].toFixed(1)} м  T=${stats[11].toFixed(2)}  H=${stats[12].toFixed(2)}\n` +
+      `ср. слои H1..H4: ${stats[2].toFixed(2)} / ${stats[3].toFixed(2)} / ${stats[4].toFixed(2)} / ${stats[5].toFixed(2)}\n` +
+      `вода ${stats[6].toFixed(3)}  водосбор ср./макс: ${stats[9].toFixed(1)} / ${stats[10].toFixed(0)}\n` +
+      `зажимов<0: ${simClampViolations}`;
+  } catch (e) {
+    console.error('HUD error:', e);
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
