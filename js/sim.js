@@ -7,12 +7,14 @@
 //
 // Each step is a small named function below; STEPS only references them.
 
-import { GRID, SIM, ICE, PLATES } from './constants.js';
+import { GRID, SIM, ICE, PLATES, EROSION, LAKES } from './constants.js';
 const { N, L } = GRID;
 const { DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL,
         CLIMATE_INTERVAL, AQ_FLOW_INTERVAL } = SIM;
 const { AQ_MAX } = ICE;
 const { RELAX_K, MANTLE_RATE, BLEND_WIDTH } = PLATES;
+const { EVAP } = EROSION;
+const { FILL_RATE: LAKE_FILL_RATE, DRAIN_RATE: LAKE_DRAIN_RATE } = LAKES;
 import { State, Globals, resetCounters, recomputeSurface, H1, H2, H3, H4, surfaceField } from './state.js';
 import { bilinearWrap } from './utils.js';
 import {
@@ -24,7 +26,7 @@ import {
   computeFlowRouting, computeSpillLevels,
   advectWater, advectAq,
 } from './hydrology.js';
-import { applyTalus, riverErosion, evaporate, applyLakes } from './erosion.js';
+import { applyTalus, riverErosion } from './erosion.js';
 import { lithify, initSoil, initGravel, initSoftRock, clampSafety } from './surface.js';
 import { initPlumes, tickVolcanoes } from './volcano.js';
 import { windAdvect, windErodeDeposit, dropWindSed } from './wind.js';
@@ -122,41 +124,42 @@ function stepWind(dt, t /*, c */) {
 }
 
 // --- Hydrology cycle (every tick) ---
-function stepRain(dt, t /*, c */) {
-  if (!Globals.rainEnabled) return;
+// Rain + infiltration in a single field sweep — both touch W/Aq, and
+// infiltration must run after rain anyway, so fusing them is free.
+function stepRainInfiltrate(dt, t /*, c */) {
+  const rainOn = Globals.rainEnabled;
   for (let j = 0; j < N; j++) {
     const v = (j / N) * Math.PI * 2, jN = j * N;
     for (let i = 0; i < N; i++) {
-      const u = (i / N) * Math.PI * 2, idx = jN + i;
-      const cloud = 0.5
-        + 0.35 * Math.sin(2 * u + t * 0.06) * Math.cos(3 * v - t * 0.04)
-        + 0.15 * Math.sin(5 * u - 2 * v + t * 0.10);
-      const regional = 0.3 + 0.7 * State.humidity[idx];
-      const rate = (0.010 + 0.012 * Math.max(0, cloud - 0.2)) * regional;
+      const idx = jN + i;
       const surface = surfaceField[idx];
-      if (surface >= Globals.seaLevel) {
-        State.W[idx]  += rate * dt * 0.7;
-        State.Aq[idx] = Math.min(AQ_MAX, State.Aq[idx] + rate * dt * 0.3);
-      } else {
-        State.W[idx] += rate * dt;
+      if (rainOn) {
+        const u = (i / N) * Math.PI * 2;
+        const cloud = 0.5
+          + 0.35 * Math.sin(2 * u + t * 0.06) * Math.cos(3 * v - t * 0.04)
+          + 0.15 * Math.sin(5 * u - 2 * v + t * 0.10);
+        const regional = 0.3 + 0.7 * State.humidity[idx];
+        const rate = (0.010 + 0.012 * Math.max(0, cloud - 0.2)) * regional;
+        if (surface >= Globals.seaLevel) {
+          State.W[idx]  += rate * dt * 0.7;
+          State.Aq[idx] = Math.min(AQ_MAX, State.Aq[idx] + rate * dt * 0.3);
+        } else {
+          State.W[idx] += rate * dt;
+        }
       }
-    }
-  }
-}
-
-function stepInfiltrate(dt /*, t, c */) {
-  for (let k = 0; k < N * N; k++) {
-    const surface = surfaceField[k];
-    const isUnderwater = surface < Globals.seaLevel;
-    if (!isUnderwater && State.W[k] > 0.0005 && State.Aq[k] < AQ_MAX) {
-      const infil = Math.min(State.W[k] * 0.5, 0.15 * State.W[k] * dt);
-      State.W[k] -= infil;
-      State.Aq[k] = Math.min(AQ_MAX, State.Aq[k] + infil);
-    }
-    if (State.Aq[k] > 0) {
-      const baseflow = 0.008 * State.Aq[k] * dt;
-      State.Aq[k] -= baseflow;
-      State.W[k]  += baseflow;
+      // Infiltrate + baseflow (only meaningful on land).
+      if (surface >= Globals.seaLevel) {
+        if (State.W[idx] > 0.0005 && State.Aq[idx] < AQ_MAX) {
+          const infil = Math.min(State.W[idx] * 0.5, 0.15 * State.W[idx] * dt);
+          State.W[idx] -= infil;
+          State.Aq[idx] = Math.min(AQ_MAX, State.Aq[idx] + infil);
+        }
+        if (State.Aq[idx] > 0) {
+          const baseflow = 0.008 * State.Aq[idx] * dt;
+          State.Aq[idx] -= baseflow;
+          State.W[idx]  += baseflow;
+        }
+      }
     }
   }
 }
@@ -175,8 +178,33 @@ function stepAq(dt, t, c) {
 }
 
 function stepErosion(dt /*, t, c */) { riverErosion(dt); recomputeSurface(); }
-function stepEvap(dt /*, t, c */)    { evaporate(dt); }
-function stepLakes(dt /*, t, c */)   { applyLakes(dt); }
+
+// Evaporation + lake fill/drain in one pass — lakes needs to see the
+// post-evaporation W for the fill-rate comparison, so run evap first
+// inside the loop.
+function stepEvapLakes(dt /*, t, c */) {
+  const ev = Math.max(0, 1 - EVAP * dt);
+  for (let k = 0; k < N * N; k++) {
+    // 1. Evaporation.
+    State.W[k] *= ev;
+    if (State.W[k] < 1e-5) { State.W[k] = 0; State.Sed[k] = 0; }
+    // 2. Lake fill / drain / ocean clamping.
+    const surface = surfaceField[k];
+    if (surface < Globals.seaLevel) {
+      State.W[k] = Globals.seaLevel - surface;
+    } else {
+      const lakeTarget = Math.max(0, State.spillLevel[k] - surface);
+      if (lakeTarget > 0.1) {
+        if (State.W[k] < lakeTarget) {
+          State.W[k] = Math.min(lakeTarget, State.W[k] + LAKE_FILL_RATE * dt);
+        } else if (State.W[k] > lakeTarget + 0.05) {
+          State.W[k] = Math.max(lakeTarget, State.W[k] - LAKE_DRAIN_RATE * dt);
+        }
+      }
+    }
+  }
+}
+
 function stepClamp(/* dt, t, c */)    { clampSafety(); }
 
 // =====================================================================
@@ -203,14 +231,12 @@ const STEPS = [
   { name: 'lithify',   every: null, fn: stepLithify  },
   { name: 'ice',       every: null, fn: stepIce      },
   { name: 'wind',      every: null, fn: stepWind     },
-  { name: 'rain',      every: null, fn: stepRain     },
-  { name: 'infiltr',   every: null, fn: stepInfiltrate },
-  { name: 'water',     every: null, fn: stepWater    },
-  { name: 'aq',        every: AQ_FLOW_INTERVAL,     fn: stepAq },
-  { name: 'erosion',   every: null, fn: stepErosion  },
-  { name: 'evap',      every: null, fn: stepEvap     },
-  { name: 'lakes',     every: null, fn: stepLakes    },
-  { name: 'clamp',     every: null, fn: stepClamp    },
+  { name: 'rain_infiltr', every: null, fn: stepRainInfiltrate },
+  { name: 'water',        every: null, fn: stepWater },
+  { name: 'aq',           every: AQ_FLOW_INTERVAL, fn: stepAq },
+  { name: 'erosion',      every: null, fn: stepErosion },
+  { name: 'evap_lakes',   every: null, fn: stepEvapLakes },
+  { name: 'clamp',        every: null, fn: stepClamp },
 ];
 
 // =====================================================================
