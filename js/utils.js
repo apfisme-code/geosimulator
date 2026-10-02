@@ -1,7 +1,7 @@
 // Pure utility helpers — no module-level state.
 
 import { GRID } from './constants.js';
-const { N, cellSize, TAU } = GRID;
+const { L, N, cellSize, TAU } = GRID;
 
 // Perlin's quintic fade curve (used by the 4D noise sampler)
 export const fade = t => t * t * t * (t * (t * 6 - 15) + 10);

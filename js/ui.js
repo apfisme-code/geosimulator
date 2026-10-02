@@ -2,7 +2,7 @@
 // reads from State/Globals, doesn't write back.
 
 import { GRID, SIM, CLIMATE, VOLCANO, OVERLAY, PLATES } from './constants.js';
-const { N, cellSize, L } = GRID;
+const { N, cellSize, L, wrap } = GRID;
 const { DRIFT_INTERVAL } = SIM;
 const { ICE_TEMP, SNOW_TEMP, SEA_LEVEL_MIN, SEA_LEVEL_MAX } = CLIMATE;
 const { ASH_LAYER_MAX } = VOLCANO;

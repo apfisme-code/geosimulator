@@ -106,6 +106,9 @@ export function computeClimate(t) {
     const alt = Math.max(0, h) / 80;
     let t2 = lat * (1 - TEMP_ALT_LAPSE * alt) + State.currentT[k];
     t2 += State.eruptHeat[k] * 0.35;
+    if (!isFinite(t2)) {
+      throw new Error(`computeClimate: t2 NaN at k=${k} lat=${lat} alt=${alt} h=${h} currentT=${State.currentT[k]} eruptHeat=${State.eruptHeat[k]}`);
+    }
     if (t2 < 0) t2 = 0;
     if (t2 > 1) t2 = 1;
     State.temperature[k] = t2;
@@ -115,7 +118,12 @@ export function computeClimate(t) {
 // Adapt sea level toward a target driven by the global temperature anomaly.
 export function updateSeaLevel() {
   let tSum = 0;
-  for (let k = 0; k < N * N; k++) tSum += State.temperature[k];
+  for (let k = 0; k < N * N; k++) {
+    if (!isFinite(State.temperature[k])) {
+      throw new Error(`updateSeaLevel: temperature[${k}] is ${State.temperature[k]}`);
+    }
+    tSum += State.temperature[k];
+  }
   const tAvg = tSum / (N * N);
   Globals.tRef += (tAvg - Globals.tRef) * T_REF_ALPHA;
   const anomaly = tAvg - Globals.tRef;

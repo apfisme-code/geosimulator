@@ -12,18 +12,27 @@ export function initSoil(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 8) return 0.05;
   const n = fbmTorus((idx % N) * cellSize, ((idx / N) | 0) * cellSize, 3, 6.0, Globals.worldSeed + 11);
+  if (!isFinite(n)) {
+    throw new Error(`initSoil[${idx}]: fbmTorus NaN, worldSeed=${Globals.worldSeed}, target=${t}`);
+  }
   return Math.max(0.05, 0.5 + 0.4 * n);
 }
 export function initGravel(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 15) return 0.1;
   const n = fbmTorus((idx % N) * cellSize, ((idx / N) | 0) * cellSize, 3, 5.0, Globals.worldSeed + 22);
+  if (!isFinite(n)) {
+    throw new Error(`initGravel[${idx}]: fbmTorus NaN, worldSeed=${Globals.worldSeed}, target=${t}`);
+  }
   return Math.max(0.1, 1.5 + 0.7 * n);
 }
 export function initSoftRock(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 10) return 0.2;
   const n = fbmTorus((idx % N) * cellSize, ((idx / N) | 0) * cellSize, 3, 4.0, Globals.worldSeed + 33);
+  if (!isFinite(n)) {
+    throw new Error(`initSoftRock[${idx}]: fbmTorus NaN, worldSeed=${Globals.worldSeed}, target=${t}`);
+  }
   return Math.max(0.2, 3.5 + 1.5 * n);
 }
 
@@ -86,26 +95,38 @@ export function sampleHeight(x, z) {
     }
     return s;
   };
-  return ((top(j0 * N + i0) * (1 - tx) + top(j0 * N + i1) * tx) * (1 - tz)
-        + (top(j1 * N + i0) * (1 - tx) + top(j1 * N + i1) * tx) * tz);
+  const result = ((top(j0 * N + i0) * (1 - tx) + top(j0 * N + i1) * tx) * (1 - tz)
+                + (top(j1 * N + i0) * (1 - tx) + top(j1 * N + i1) * tx) * tz);
+  // Safety: never return NaN — would propagate into the player physics and
+  // drop them through the world. Fall back to sea level.
+  return isFinite(result) ? result : Globals.seaLevel;
 }
 
-// NaN/clamp safety net at the end of every simulation step.
+// NaN safety net at the end of every simulation step.
+// Height layers (H1..H4) can be legitimately negative — that's where
+// ocean trenches live. We only reset NaN/Infinity to 0, never clamp to
+// a non-negative value. Flux arrays (W, Sed, Aq, …) are physically
+// ≥ 0 and get clamped to 0 on negative + non-finite.
 export function clampSafety() {
   let violated = 0;
   for (let k = 0; k < N * N; k++) {
-    if (H1[k] < 0)   { H1[k] = 0;   violated++; }
-    if (H2[k] < 0)   { H2[k] = 0;   violated++; }
-    if (H3[k] < 0)   { H3[k] = 0;   violated++; }
-    if (State.W[k]  < 0)   { State.W[k]  = 0; violated++; }
-    if (State.Sed[k] < 0)   { State.Sed[k] = 0; violated++; }
-    if (State.windSed[k] < 0) { State.windSed[k] = 0; violated++; }
+    if (!isFinite(H1[k])) { H1[k] = 0; violated++; }
+    if (!isFinite(H2[k])) { H2[k] = 0; violated++; }
+    if (!isFinite(H3[k])) { H3[k] = 0; violated++; }
     if (!isFinite(H4[k])) { H4[k] = 0; violated++; }
-    if (State.snowLayer[k] < 0) State.snowLayer[k] = 0;
-    if (State.iceLayer[k]  < 0) State.iceLayer[k]  = 0;
-    if (State.Aq[k] < 0)        State.Aq[k] = 0;
-    if (State.Aq[k] > AQ_MAX)   State.Aq[k] = AQ_MAX;
-    if (State.lavaBonus[k] < 0) State.lavaBonus[k] = 0;
+    if (!isFinite(State.W[k])         || State.W[k] < 0)         { State.W[k] = 0; if (!isFinite(State.W[k])) violated++; }
+    if (!isFinite(State.Sed[k])       || State.Sed[k] < 0)       { State.Sed[k] = 0; if (!isFinite(State.Sed[k])) violated++; }
+    if (!isFinite(State.windSed[k])   || State.windSed[k] < 0)   { State.windSed[k] = 0; if (!isFinite(State.windSed[k])) violated++; }
+    if (!isFinite(State.snowLayer[k]) || State.snowLayer[k] < 0) State.snowLayer[k] = 0;
+    if (!isFinite(State.iceLayer[k])  || State.iceLayer[k]  < 0) State.iceLayer[k]  = 0;
+    if (!isFinite(State.Aq[k]))        State.Aq[k] = 0;
+    else if (State.Aq[k] < 0)          State.Aq[k] = 0;
+    else if (State.Aq[k] > AQ_MAX)     State.Aq[k] = AQ_MAX;
+    if (!isFinite(State.lavaBonus[k]) || State.lavaBonus[k] < 0) State.lavaBonus[k] = 0;
+    if (!isFinite(State.eruptHeat[k]))  State.eruptHeat[k] = 0;
+    if (!isFinite(State.ashLayer[k]))    State.ashLayer[k] = 0;
+    if (!isFinite(State.flowAccumRouting[k])) State.flowAccumRouting[k] = 0;
+    if (!isFinite(State.spillLevel[k])) State.spillLevel[k] = 0;
   }
   Globals.simClampViolations += violated;
   return violated;
