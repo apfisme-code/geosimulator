@@ -58,36 +58,46 @@ export function applyTalus(dt) {
 
 // Transport-limited erosion/deposition driven by water flux and slope.
 export function riverErosion(dt) {
-  for (let k = 0; k < N * N; k++) {
-    const i = k % N, j = (k / N) | 0;
-    const iE = (i + 1) % N, iW = (i - 1 + N) % N;
-    const jN = (j + 1) % N, jS = (j - 1 + N) % N;
-    const g = kk => surfaceField[kk];
-    const dhdx = (g(j * N + iE) - g(j * N + iW)) / (2 * cellSize);
-    const dhdz = (g(jN * N + i) - g(jS * N + i)) / (2 * cellSize);
-    const slope = Math.hypot(dhdx, dhdz);
-    const slopeFactor = smoothstep(0.02, 0.35, slope);
-    const upstreamTerm = Math.sqrt(State.flowAccumRouting[k]) * K_DRAIN_ROUTING;
-    const cap = K_CAP * (State.Fmag[k] + upstreamTerm) * (0.10 + 0.90 * slopeFactor);
-    const s = State.Sed[k];
-    if (cap > s) {
-      const riverErode = K_RIVER_ERODE *
-        Math.min(1, Math.log(1 + State.flowAccumRouting[k]) / Math.log(1 + 300)) * dt;
-      let amount = (cap - s) * K_ERODE * (0.3 + 0.7 * slopeFactor) * dt + riverErode;
-      if (amount > MAX_ERODE) amount = MAX_ERODE;
-      if (amount > 0) {
-        let rem = amount;
-        const e1 = Math.min(H1[k], rem); H1[k] -= e1; rem -= e1;
-        const e2 = Math.min(H2[k], rem); H2[k] -= e2; rem -= e2;
-        const e3 = Math.min(H3[k], rem); H3[k] -= e3; rem -= e3;
-        const e4 = rem * K_ERODE_ROCK;
-        H4[k] -= e4;
-        State.Sed[k] += e1 + e2 + e3 + e4;
+  for (let j = 0; j < N; j++) {
+    const jN = j === N - 1 ? 0 : j + 1;
+    const jS = j === 0 ? N - 1 : j - 1;
+    const rowC = j * N;
+    const rowN = jN * N;
+    const rowS = jS * N;
+    for (let i = 0; i < N; i++) {
+      const iE = i === N - 1 ? 0 : i + 1;
+      const iW = i === 0 ? N - 1 : i - 1;
+      const k   = rowC + i;
+      const kE  = rowC + iE;
+      const kW  = rowC + iW;
+      const kN  = rowN + i;
+      const kS  = rowS + i;
+      const dhdx = (surfaceField[kE] - surfaceField[kW]) / (2 * cellSize);
+      const dhdz = (surfaceField[kN] - surfaceField[kS]) / (2 * cellSize);
+      const slope = Math.hypot(dhdx, dhdz);
+      const slopeFactor = smoothstep(0.02, 0.35, slope);
+      const upstreamTerm = Math.sqrt(State.flowAccumRouting[k]) * K_DRAIN_ROUTING;
+      const cap = K_CAP * (State.Fmag[k] + upstreamTerm) * (0.10 + 0.90 * slopeFactor);
+      const s = State.Sed[k];
+      if (cap > s) {
+        const riverErode = K_RIVER_ERODE *
+          Math.min(1, Math.log(1 + State.flowAccumRouting[k]) / Math.log(1 + 300)) * dt;
+        let amount = (cap - s) * K_ERODE * (0.3 + 0.7 * slopeFactor) * dt + riverErode;
+        if (amount > MAX_ERODE) amount = MAX_ERODE;
+        if (amount > 0) {
+          let rem = amount;
+          const e1 = Math.min(H1[k], rem); H1[k] -= e1; rem -= e1;
+          const e2 = Math.min(H2[k], rem); H2[k] -= e2; rem -= e2;
+          const e3 = Math.min(H3[k], rem); H3[k] -= e3; rem -= e3;
+          const e4 = rem * K_ERODE_ROCK;
+          H4[k] -= e4;
+          State.Sed[k] += e1 + e2 + e3 + e4;
+        }
+      } else if (s > cap) {
+        let dep = (s - cap) * K_DEPOSIT * (0.5 + 2.0 * (1 - slopeFactor)) * dt;
+        if (dep > s) dep = s;
+        if (dep > 0) { H1[k] += dep; State.Sed[k] -= dep; }
       }
-    } else if (s > cap) {
-      let dep = (s - cap) * K_DEPOSIT * (0.5 + 2.0 * (1 - slopeFactor)) * dt;
-      if (dep > s) dep = s;
-      if (dep > 0) { H1[k] += dep; State.Sed[k] -= dep; }
     }
   }
 }

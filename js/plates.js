@@ -154,81 +154,90 @@ export function computeWorleyFields() {
   // Assemble targetSurface (heights + boundaries + plateaus + detail + lava bonus)
   const K1b = State.plateK1, K2b = State.plateK2;
   const TGT = State.targetSurface;
-  for (let k = 0; k < N * N; k++) {
-    const k1 = K1b[k], k2 = K2b[k];
-    if (k1 < 0) { TGT[k] = 0; continue; }
-    const tA = TA[k], tB = TB[k];
-    const edge = F2[k] - F1[k];
-    const wA = 0.5 + 0.5 * Math.tanh(edge / BLEND_WIDTH);
-    const hA = HA[k], hB = HB[k];
-    const hBlend = wA * hA + (1 - wA) * hB;
+  for (let j = 0; j < N; j++) {
+    const z = j * cellSize;
+    for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      const k1 = K1b[k], k2 = K2b[k];
+      if (k1 < 0) { TGT[k] = 0; continue; }
+      const tA = TA[k], tB = TB[k];
+      const edge = F2[k] - F1[k];
+      const wA = 0.5 + 0.5 * Math.tanh(edge / BLEND_WIDTH);
+      const hA = HA[k], hB = HB[k];
+      const hBlend = wA * hA + (1 - wA) * hB;
 
-    const dx = wrapRel(State.plateCX[k2] - State.plateCX[k1]);
-    const dz = wrapRel(State.plateCZ[k2] - State.plateCZ[k1]);
-    const dNorm = Math.hypot(dx, dz) || 1;
-    const nx = dx / dNorm, nz = dz / dNorm;
-    const vRelX = State.plateDriftVX[k2] - State.plateDriftVX[k1];
-    const vRelZ = State.plateDriftVZ[k2] - State.plateDriftVZ[k1];
-    const vn = vRelX * nx + vRelZ * nz;
-    const vnNorm = Math.max(-1, Math.min(1, vn / PLATE_VN_SCALE));
+      const dx = wrapRel(State.plateCX[k2] - State.plateCX[k1]);
+      const dz = wrapRel(State.plateCZ[k2] - State.plateCZ[k1]);
+      const dNorm = Math.hypot(dx, dz) || 1;
+      const nx = dx / dNorm, nz = dz / dNorm;
+      const vRelX = State.plateDriftVX[k2] - State.plateDriftVX[k1];
+      const vRelZ = State.plateDriftVZ[k2] - State.plateDriftVZ[k1];
+      const vn = vRelX * nx + vRelZ * nz;
+      const vnNorm = Math.max(-1, Math.min(1, vn / PLATE_VN_SCALE));
 
-    const boundary = Math.exp(-edge * edge / (2 * RIDGE_WIDTH * RIDGE_WIDTH));
-    let boundaryHeight = 0;
-    if (vnNorm < -VN_THRESHOLD) {
-      const conv = -vnNorm;
-      if      (tA === 1 && tB === 1) boundaryHeight = RIDGE_MAX * conv * boundary;
-      else if (tA === 0 && tB === 0) boundaryHeight = -TRENCH_MAX * 0.7 * conv * boundary;
-      else if (tA === 0) {
-        boundaryHeight = -TRENCH_MAX * conv *
-          Math.exp(-edge * edge / (2 * TRENCH_SIG * TRENCH_SIG));
-      } else {
-        const d = edge - ARC_OFFSET;
-        boundaryHeight = ARC_MAX * conv *
-          Math.exp(-d * d / (2 * ARC_SIG * ARC_SIG));
+      const boundary = Math.exp(-edge * edge / (2 * RIDGE_WIDTH * RIDGE_WIDTH));
+      let boundaryHeight = 0;
+      if (vnNorm < -VN_THRESHOLD) {
+        const conv = -vnNorm;
+        if      (tA === 1 && tB === 1) boundaryHeight = RIDGE_MAX * conv * boundary;
+        else if (tA === 0 && tB === 0) boundaryHeight = -TRENCH_MAX * 0.7 * conv * boundary;
+        else if (tA === 0) {
+          boundaryHeight = -TRENCH_MAX * conv *
+            Math.exp(-edge * edge / (2 * TRENCH_SIG * TRENCH_SIG));
+        } else {
+          const d = edge - ARC_OFFSET;
+          boundaryHeight = ARC_MAX * conv *
+            Math.exp(-d * d / (2 * ARC_SIG * ARC_SIG));
+        }
+      } else if (vnNorm > VN_THRESHOLD) {
+        const div = vnNorm;
+        if (tA === 1 && tB === 1) boundaryHeight = -RIFT_MAX * div * boundary;
+        else if (tA === 0 && tB === 0) {
+          const midRidge  = MID_RIDGE_MAX * div * boundary;
+          const axialRift = -AXIAL_RIFT_MAX * div *
+            Math.exp(-edge * edge / (2 * 8 * 8));
+          boundaryHeight = midRidge + axialRift;
+        }
       }
-    } else if (vnNorm > VN_THRESHOLD) {
-      const div = vnNorm;
-      if (tA === 1 && tB === 1) boundaryHeight = -RIFT_MAX * div * boundary;
-      else if (tA === 0 && tB === 0) {
-        const midRidge  = MID_RIDGE_MAX * div * boundary;
-        const axialRift = -AXIAL_RIFT_MAX * div *
-          Math.exp(-edge * edge / (2 * 8 * 8));
-        boundaryHeight = midRidge + axialRift;
+
+      let plateau = 0;
+      if (vnNorm > VN_THRESHOLD && tA === 1 && tB === 1) {
+        const d = Math.abs(edge - PLATEAU_OFFSET);
+        plateau = PLATEAU_MAX * vnNorm * Math.exp(-d * d / (2 * PLATEAU_SIG * PLATEAU_SIG));
       }
+
+      const x = i * cellSize;
+      const hillsBlend = wA * HiA[k] + (1 - wA) * HiB[k];
+      const detailNoise = fbmTorus(x, z, DETAIL_OCT, DETAIL_FREQ, Globals.worldSeed + 777);
+      const detail = DETAIL_AMP * (0.3 + 0.7 * hillsBlend) * detailNoise;
+
+      TGT[k] = hBlend + boundaryHeight + plateau + detail;
     }
-
-    let plateau = 0;
-    if (vnNorm > VN_THRESHOLD && tA === 1 && tB === 1) {
-      const d = Math.abs(edge - PLATEAU_OFFSET);
-      plateau = PLATEAU_MAX * vnNorm * Math.exp(-d * d / (2 * PLATEAU_SIG * PLATEAU_SIG));
-    }
-
-    const x = (k % N) * cellSize;
-    const z = ((k / N) | 0) * cellSize;
-    const hillsBlend = wA * HiA[k] + (1 - wA) * HiB[k];
-    const detailNoise = fbmTorus(x, z, DETAIL_OCT, DETAIL_FREQ, Globals.worldSeed + 777);
-    const detail = DETAIL_AMP * (0.3 + 0.7 * hillsBlend) * detailNoise;
-
-    TGT[k] = hBlend + boundaryHeight + plateau + detail;
   }
 
   // Lava is part of the permanent target — relaxation must not eat the cone.
-  for (let k = 0; k < N * N; k++) {
-    TGT[k] += State.lavaBonus[k];
-  }
+  const TGT2 = State.targetSurface, LBO = State.lavaBonus;
+  for (let k = 0; k < N * N; k++) TGT2[k] += LBO[k];
 }
 
 // Slowly drifting low-frequency noise driving volcanism / uplift.
 export function computeMantleField(t) {
   const ox = Math.cos(t * MANTLE_DRIFT) * 4.0;
   const oy = Math.sin(t * MANTLE_DRIFT) * 4.0;
-  for (let k = 0; k < N * N; k++) {
-    const x = (k % N) * cellSize;
-    const z = ((k / N) | 0) * cellSize;
-    const u = (x / L) * TAU, v = (z / L) * TAU;
-    const cu = Math.cos(u), su = Math.sin(u), cv = Math.cos(v), sv = Math.sin(v);
-    State.mantleField[k] = vnoise4(cu * 1.4 + ox, su * 1.4 + oy,
-                                   cv * 1.4 - ox, sv * 1.4 + oy,
-                                   Globals.worldSeed + 999);
+  const TAU_INV = TAU / L;
+  for (let j = 0; j < N; j++) {
+    const z = j * cellSize;
+    const v = z * TAU_INV;
+    const cv14 = Math.cos(v) * 1.4;
+    const sv14 = Math.sin(v) * 1.4;
+    for (let i = 0; i < N; i++) {
+      const x = i * cellSize;
+      const u = x * TAU_INV;
+      const cu = Math.cos(u);
+      const su = Math.sin(u);
+      State.mantleField[j * N + i] = vnoise4(cu * 1.4 + ox, su * 1.4 + oy,
+                                            cv14 - ox, sv14 + oy,
+                                            Globals.worldSeed + 999);
+    }
   }
 }

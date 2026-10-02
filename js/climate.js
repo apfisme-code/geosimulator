@@ -22,11 +22,15 @@ export function computeClimate(t) {
   // 1. Distance to water (BFS from any cell that holds water or ice)
   State.humDist.fill(1e9);
   let head = 0, tail = 0;
-  for (let k = 0; k < N * N; k++) {
-    const surface = surfaceField[k];
-    if (surface < Globals.seaLevel || State.W[k] > 0.05 || State.iceLayer[k] > 0.05) {
-      State.humDist[k] = 0;
-      State.bfsQueue[tail++] = k;
+  for (let j = 0; j < N; j++) {
+    const row = j * N;
+    for (let i = 0; i < N; i++) {
+      const k = row + i;
+      const surface = surfaceField[k];
+      if (surface < Globals.seaLevel || State.W[k] > 0.05 || State.iceLayer[k] > 0.05) {
+        State.humDist[k] = 0;
+        State.bfsQueue[tail++] = k;
+      }
     }
   }
   while (head < tail) {
@@ -64,16 +68,18 @@ export function computeClimate(t) {
   }
 
   // 3. Combine distance + river routing + noise, apply rain shadow.
-  for (let k = 0; k < N * N; k++) {
-    const distHum = Math.exp(-State.humDist[k] / HUMIDITY_FALLOFF);
-    const riverTerm = Math.min(1, Math.log(1 + State.flowAccumRouting[k]) / Math.log(1 + 200)) * 0.7;
-    const x = (k % N) * cellSize;
-    const z = ((k / N) | 0) * cellSize;
-    const noise = 0.5 + 0.5 * fbmTorus(x, z, 3, 2.0, Globals.worldSeed + 555);
-    let h = (0.15 + 0.55 * distHum + riverTerm + 0.15 * noise) * State.rainShadow[k];
-    if (h > 1) h = 1;
-    if (h < 0) h = 0;
-    State.humidity[k] = h;
+  for (let j = 0; j < N; j++) {
+    const z = j * cellSize;
+    for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      const distHum = Math.exp(-State.humDist[k] / HUMIDITY_FALLOFF);
+      const riverTerm = Math.min(1, Math.log(1 + State.flowAccumRouting[k]) / Math.log(1 + 200)) * 0.7;
+      const noise = 0.5 + 0.5 * fbmTorus(i * cellSize, z, 3, 2.0, Globals.worldSeed + 555);
+      let h = (0.15 + 0.55 * distHum + riverTerm + 0.15 * noise) * State.rainShadow[k];
+      if (h > 1) h = 1;
+      if (h < 0) h = 0;
+      State.humidity[k] = h;
+    }
   }
 
   // 4. Ocean currents: warm east-bound, cold west-bound at coastlines.
@@ -98,20 +104,23 @@ export function computeClimate(t) {
 
   // 5. Temperature = latitude * (1 - lapse*alt) + current + heat, with seasonal shift.
   const seasonOffset = SEASON_AMP * Math.sin(t * SEASON_RATE);
-  for (let k = 0; k < N * N; k++) {
-    const z = ((k / N) | 0) * cellSize;
+  for (let j = 0; j < N; j++) {
+    const z = j * cellSize;
     const zShift = z + seasonOffset;
     const lat = 0.5 + 0.5 * Math.cos(TAU * zShift / L);
-    const h = surfaceField[k];
-    const alt = Math.max(0, h) / 80;
-    let t2 = lat * (1 - TEMP_ALT_LAPSE * alt) + State.currentT[k];
-    t2 += State.eruptHeat[k] * 0.35;
-    if (!isFinite(t2)) {
-      throw new Error(`computeClimate: t2 NaN at k=${k} lat=${lat} alt=${alt} h=${h} currentT=${State.currentT[k]} eruptHeat=${State.eruptHeat[k]}`);
+    for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      const h = surfaceField[k];
+      const alt = Math.max(0, h) / 80;
+      let t2 = lat * (1 - TEMP_ALT_LAPSE * alt) + State.currentT[k];
+      t2 += State.eruptHeat[k] * 0.35;
+      if (!isFinite(t2)) {
+        throw new Error(`computeClimate: t2 NaN at k=${k} lat=${lat} alt=${alt} h=${h} currentT=${State.currentT[k]} eruptHeat=${State.eruptHeat[k]}`);
+      }
+      if (t2 < 0) t2 = 0;
+      if (t2 > 1) t2 = 1;
+      State.temperature[k] = t2;
     }
-    if (t2 < 0) t2 = 0;
-    if (t2 > 1) t2 = 1;
-    State.temperature[k] = t2;
   }
 }
 
