@@ -13,7 +13,7 @@ const { DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL,
         CLIMATE_INTERVAL, AQ_FLOW_INTERVAL } = SIM;
 const { AQ_MAX } = ICE;
 const { RELAX_K, MANTLE_RATE, BLEND_WIDTH } = PLATES;
-import { State, Globals, resetCounters, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, resetCounters, recomputeSurface, H1, H2, H3, H4, surfaceField } from './state.js';
 import { bilinearWrap } from './utils.js';
 import {
   initPlates, computeWorleyFields, driftPlates,
@@ -48,7 +48,7 @@ function stepDrift(dt, t /*, c */) {
 function stepAdvect(dt /*, t, c */) {
   advectLayers(ADVECT_INTERVAL * dt);
   Globals.advectRuns++;
-  if (!isFinite(H1[0] + H2[0] + H3[0] + H4[0])) {
+  if (!isFinite(surfaceField[0])) {
     throw new Error(`stepAdvect produced NaN at k=0 — H1=${H1[0]} H2=${H2[0]} H3=${H3[0]} H4=${H4[0]} c=${Globals.simStepCount}`);
   }
 }
@@ -85,8 +85,8 @@ function stepRouting(/* dt, t, c */) {
 }
 function stepClimate(dt, t /*, c */) {
   // Diagnostics: catch the moment a height field first goes NaN.
-  if (!isFinite(H1[0] + H2[0] + H3[0] + H4[0])) {
-    throw new Error(`stepClimate precondition: H1+H2+H3+H4 NaN at k=0 — H1=${H1[0]} H2=${H2[0]} H3=${H3[0]} H4=${H4[0]} t=${t} c=${Globals.simStepCount}`);
+  if (!isFinite(surfaceField[0])) {
+    throw new Error(`stepClimate precondition: surfaceField NaN at k=0 — H1=${H1[0]} H2=${H2[0]} H3=${H3[0]} H4=${H4[0]} t=${t} c=${Globals.simStepCount}`);
   }
   computeClimate(t);
   updateSeaLevel();
@@ -99,11 +99,13 @@ function stepVolcanoes(/* dt, t, c */) { tickVolcanoes(); }
 function stepRelax(dt, t /*, c */) {
   const pulse = 0.7 + 0.3 * Math.sin(t * 0.11);
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     const target  = State.targetSurface[k];
     const m = State.mantleField[k];
-    H4[k] += RELAX_K * (target - surface) * pulse * dt;
-    H4[k] += MANTLE_RATE * m * dt;
+    const dH4 = RELAX_K * (target - surface) * pulse * dt
+              + MANTLE_RATE * m * dt;
+    H4[k] += dH4;
+    surfaceField[k] += dH4;
   }
 }
 
@@ -131,7 +133,7 @@ function stepRain(dt, t /*, c */) {
         + 0.15 * Math.sin(5 * u - 2 * v + t * 0.10);
       const regional = 0.3 + 0.7 * State.humidity[idx];
       const rate = (0.010 + 0.012 * Math.max(0, cloud - 0.2)) * regional;
-      const surface = H1[idx] + H2[idx] + H3[idx] + H4[idx];
+      const surface = surfaceField[idx];
       if (surface >= Globals.seaLevel) {
         State.W[idx]  += rate * dt * 0.7;
         State.Aq[idx] = Math.min(AQ_MAX, State.Aq[idx] + rate * dt * 0.3);
@@ -144,7 +146,7 @@ function stepRain(dt, t /*, c */) {
 
 function stepInfiltrate(dt /*, t, c */) {
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     const isUnderwater = surface < Globals.seaLevel;
     if (!isUnderwater && State.W[k] > 0.0005 && State.Aq[k] < AQ_MAX) {
       const infil = Math.min(State.W[k] * 0.5, 0.15 * State.W[k] * dt);
@@ -165,14 +167,14 @@ function stepAq(dt, t, c) {
   const aqDt = dt * AQ_FLOW_INTERVAL;
   advectAq(aqDt, (c & 1) === 1);
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     if (surface < Globals.seaLevel) State.Aq[k] = 0;
     if (State.Aq[k] < 0)        State.Aq[k] = 0;
     if (State.Aq[k] > AQ_MAX)   State.Aq[k] = AQ_MAX;
   }
 }
 
-function stepErosion(dt /*, t, c */) { riverErosion(dt); }
+function stepErosion(dt /*, t, c */) { riverErosion(dt); recomputeSurface(); }
 function stepEvap(dt /*, t, c */)    { evaporate(dt); }
 function stepLakes(dt /*, t, c */)   { applyLakes(dt); }
 function stepClamp(/* dt, t, c */)    { clampSafety(); }
@@ -241,7 +243,7 @@ window.__sim = {
     return {
       idx: k,
       H1: H1[k], H2: H2[k], H3: H3[k], H4: H4[k],
-      surface: H1[k] + H2[k] + H3[k] + H4[k],
+      surface: surfaceField[k],
       target: State.targetSurface[k],
       mantle: State.mantleField[k],
     };
@@ -278,8 +280,10 @@ export function resetTerrain(regen) {
     const H123 = H1[k] + H2[k] + H3[k];
     H4[k] = State.targetSurface[k] - H123;
   }
+  // After H4 is back-filled from targetSurface, the surface stack matches target everywhere.
+  recomputeSurface();
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     State.W[k] = surface < Globals.seaLevel ? (Globals.seaLevel - surface) : 0;
   }
   State.Sed.fill(0); State.Fmag.fill(0);

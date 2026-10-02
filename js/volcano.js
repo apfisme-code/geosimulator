@@ -9,7 +9,7 @@ const { PLUME_COUNT, ERUPT_MIN: PLUME_ERUPT_MIN, ERUPT_MAX: PLUME_ERUPT_MAX,
         CRATER_SIG, CRATER_REACH, LAVA_VOLUME,
         HEAT_RADIUS, HEAT_AMOUNT, HEAT_DECAY,
         ASH_SIG, ASH_VOLUME, ASH_LAYER_MAX } = VOLCANO;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
 // Initial plume placement: anywhere above sea level with a minimum spacing.
 export function initPlumes() {
@@ -21,7 +21,7 @@ export function initPlumes() {
     const i = Math.floor(Math.random() * N);
     const j = Math.floor(Math.random() * N);
     const k = j * N + i;
-    const h = H1[k] + H2[k] + H3[k] + H4[k];
+    const h = surfaceField[k];
     if (h < Globals.seaLevel - 40) continue;
     let tooClose = false;
     for (const p of Globals.plumes) {
@@ -56,7 +56,7 @@ export function tickVolcanoes() {
 
 function eruptPlume(v) {
   const { i, j, k } = v;
-  const isUnderwater = (H1[k] + H2[k] + H3[k] + H4[k]) < Globals.seaLevel;
+  const isUnderwater = surfaceField[k] < Globals.seaLevel;
   const lavaVolume = isUnderwater ? LAVA_VOLUME * 0.6 : LAVA_VOLUME;
 
   for (let dj = -CRATER_REACH; dj <= CRATER_REACH; dj++) {

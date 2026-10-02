@@ -7,7 +7,7 @@ const { FILL_EPS, K_DRAIN_ROUTING, NBUCKETS } = HYDROLOGY;
 const { AQ_FLOW } = ICE;
 const { K_FLOW } = EROSION;
 const { SEA_LEVEL_MIN } = CLIMATE;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
 // ---------- Priority-flood spill levels ----------
 // For every cell, the minimum water height that would make water spill
@@ -50,7 +50,7 @@ export function computeSpillLevels() {
   State.spillLevel.fill(1e9);
   Globals.pfHeapSize = 0;
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     if (surface < Globals.seaLevel) {
       State.spillLevel[k] = Globals.seaLevel;
       pfPush(k, Globals.seaLevel);
@@ -71,7 +71,7 @@ export function computeSpillLevels() {
       const ni = ((i + DIRS[d][0]) % N + N) % N;
       const nj = ((j + DIRS[d][1]) % N + N) % N;
       const nk = nj * N + ni;
-      const surf = H1[nk] + H2[nk] + H3[nk] + H4[nk];
+      const surf = surfaceField[nk];
       const newLev = Math.max(lev, surf);
       if (newLev < State.spillLevel[nk]) {
         State.spillLevel[nk] = newLev;
@@ -87,7 +87,7 @@ export function computeSpillLevels() {
 export function computeFlowRouting() {
   // 1. Fill depressions (bucket data is the working copy)
   for (let k = 0; k < N * N; k++) {
-    State.bucketData[k] = H1[k] + H2[k] + H3[k] + H4[k];
+    State.bucketData[k] = surfaceField[k];
   }
   for (let pass = 0; pass < 4; pass++) {
     let changed = 0;
@@ -122,7 +122,7 @@ export function computeFlowRouting() {
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const idx = j * N + i;
-      const surface = H1[idx] + H2[idx] + H3[idx] + H4[idx];
+      const surface = surfaceField[idx];
       if (surface < Globals.seaLevel) { State.flowDir[idx] = -1; continue; }
       const h = State.bucketData[idx];
       let bestH = h, bestDir = -1;
@@ -163,7 +163,7 @@ export function computeFlowRouting() {
     }
   }
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     if (surface < Globals.seaLevel) State.flowAccumRouting[k] = 0;
   }
 }
@@ -171,8 +171,8 @@ export function computeFlowRouting() {
 // ---------- Water pair flux ----------
 // Move water between adjacent cells, biased along the D8 flow direction.
 export function waterPairBiased(a, b, dt, dirFromA, dirFromB) {
-  const sa = H1[a] + H2[a] + H3[a] + H4[a] + State.Wtmp[a];
-  const sb = H1[b] + H2[b] + H3[b] + H4[b] + State.Wtmp[b];
+  const sa = surfaceField[a] + State.Wtmp[a];
+  const sb = surfaceField[b] + State.Wtmp[b];
   const d = sa - sb;
   if (Math.abs(d) < 1e-6) return;
 
@@ -198,8 +198,8 @@ export function waterPairBiased(a, b, dt, dirFromA, dirFromB) {
 // Same shape as water, but the bias weight is smaller — aquifers concentrate
 // in valleys instead of streaming.
 export function aqPair(a, b, dt, dirFromA, dirFromB) {
-  const hA = H1[a] + H2[a] + H3[a] + H4[a] + State.Aqtmp[a];
-  const hB = H1[b] + H2[b] + H3[b] + H4[b] + State.Aqtmp[b];
+  const hA = surfaceField[a] + State.Aqtmp[a];
+  const hB = surfaceField[b] + State.Aqtmp[b];
   const d = hA - hB;
   if (Math.abs(d) < 1e-5) return;
 

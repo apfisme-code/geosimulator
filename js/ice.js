@@ -8,7 +8,7 @@ const { ICE_FORM_RATE, ICE_MELT_RATE, ICE_MAX_LAYER,
         SNOW_MAX, ICE_ACCUM, MELT_RATE,
         SNOW_COMPACT_RATE, SNOW_TO_ICE_RATIO,
         MELT_TO_W, MELT_TO_AQ, AQ_MAX } = ICE;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
 // One combined step covering sea-ice growth/melt, snow accumulation/melt,
 // snow→ice compaction and meltwater routing.
@@ -19,14 +19,14 @@ export function glacierStep(dt, t) {
     for (let i = 0; i < N; i++) {
       const iE = (i + 1) % N, iW = (i - 1 + N) % N, idx = rowC + i;
       const temp = State.temperature[idx];
-      const surface = H1[idx] + H2[idx] + H3[idx] + H4[idx];
+      const surface = surfaceField[idx];
       const isOcean = surface < Globals.seaLevel;
 
       // Slope factor — snow sticks to flat ground.
-      const hE = H1[rowC + iE] + H2[rowC + iE] + H3[rowC + iE] + H4[rowC + iE];
-      const hW = H1[rowC + iW] + H2[rowC + iW] + H3[rowC + iW] + H4[rowC + iW];
-      const hU = H1[rowN + i ] + H2[rowN + i ] + H3[rowN + i ] + H4[rowN + i ];
-      const hD = H1[rowS + i ] + H2[rowS + i ] + H3[rowS + i ] + H4[rowS + i ];
+      const hE = surfaceField[rowC + iE];
+      const hW = surfaceField[rowC + iW];
+      const hU = surfaceField[rowN + i ];
+      const hD = surfaceField[rowS + i ];
       const dhdx = (hE - hW) / (2 * cellSize);
       const dhdz = (hU - hD) / (2 * cellSize);
       const slope = Math.hypot(dhdx, dhdz);

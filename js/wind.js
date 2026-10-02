@@ -6,7 +6,7 @@ const { N, cellSize } = GRID;
 const { SPEED: WIND_SPEED, CAP_BASE: WIND_CAP_BASE, CAP_SLOPE: WIND_CAP_SLOPE,
         K_ERODE: K_WIND_ERODE, K_DEPOSIT: K_WIND_DEPOSIT,
         MAX_ERODE: MAX_WIND_ERODE } = WIND;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { windDirX, windDirZ } from './climate.js';
 
 // Semi-Lagrangian advection with CFL sub-stepping when wind is large.
@@ -44,10 +44,10 @@ export function windErodeDeposit(dt, t) {
     const rowC = j * N, rowN = jN * N, rowS = jS * N;
     for (let i = 0; i < N; i++) {
       const iE = (i + 1) % N, iW = (i - 1 + N) % N, idx = rowC + i;
-      const hE = H1[rowC + iE] + H2[rowC + iE] + H3[rowC + iE] + H4[rowC + iE];
-      const hW = H1[rowC + iW] + H2[rowC + iW] + H3[rowC + iW] + H4[rowC + iW];
-      const hU = H1[rowN + i ] + H2[rowN + i ] + H3[rowN + i ] + H4[rowN + i ];
-      const hD = H1[rowS + i ] + H2[rowS + i ] + H3[rowS + i ] + H4[rowS + i ];
+      const hE = surfaceField[rowC + iE];
+      const hW = surfaceField[rowC + iW];
+      const hU = surfaceField[rowN + i ];
+      const hD = surfaceField[rowS + i ];
       const dhdx = (hE - hW) / (2 * cellSize), dhdz = (hU - hD) / (2 * cellSize);
       const dh_dw = dhdx * wX + dhdz * wZ;
       let cap = (WIND_CAP_BASE + WIND_CAP_SLOPE * Math.max(0, -dh_dw)) * strength;

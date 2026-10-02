@@ -19,6 +19,18 @@ const H1t  = new Float32Array(N * N);
 const H2t  = new Float32Array(N * N);
 const H3t  = new Float32Array(N * N);
 const H4t  = new Float32Array(N * N);
+// Cached sum of the four layers — recomputed only when the height stack
+// changes (resetTerrain, after stepErosion). Hot loops read this instead
+// of doing four indexed adds per cell per pass.
+const surfaceField = new Float32Array(N * N);
+
+// Recompute surfaceField after any step that mutates H1..H4 in place.
+// O(N²) = 16384 adds — cheap relative to the steps that need it.
+export function recomputeSurface() {
+  for (let k = 0; k < N * N; k++) {
+    surfaceField[k] = H1[k] + H2[k] + H3[k] + H4[k];
+  }
+}
 
 // ---------- Water and sediment ----------
 const W      = new Float32Array(N * N);
@@ -108,7 +120,7 @@ const histAq     = new Float32Array(HIST_LEN);
 // (those exist so hot loops don't have to write `State.H1` everywhere).
 export const State = {
   // terrain
-  H1, H2, H3, H4, H1t, H2t, H3t, H4t,
+  H1, H2, H3, H4, H1t, H2t, H3t, H4t, surfaceField,
   // water
   W, Sed, Wtmp, Sedtmp, Fmag,
   // aquifer
@@ -143,7 +155,7 @@ export const State = {
 // Named exports for the fields used in hot loops — avoids the
 // `const H1 = State.H1` boilerplate in every consuming module.
 export {
-  H1, H2, H3, H4, H1t, H2t, H3t, H4t,
+  H1, H2, H3, H4, H1t, H2t, H3t, H4t, surfaceField,
   W, Sed, Wtmp, Sedtmp, Fmag,
   Aq, Aqtmp,
   lavaBonus, lavaBonusT,

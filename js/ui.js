@@ -33,7 +33,7 @@ export function renderSlice() {
 
   for (let i = 0; i < N; i++) {
     const k = pj * N + i;
-    const s = State.H1[k] + State.H2[k] + State.H3[k] + State.H4[k];
+    const s = State.surfaceField[k];
     const h1 = State.H1[k], h2 = State.H2[k], h3 = State.H3[k], h4 = Math.max(0, State.H4[k]);
     const sn = State.snowLayer[k], ic = State.iceLayer[k];
     const ySurface = Hc - (s - baseY) * scaleY;
@@ -187,7 +187,7 @@ function biomeAtPlayer() {
     const pk = pj * N + pi;
     const t = State.temperature[pk];
     const h = State.humidity[pk];
-    const surf = State.H1[pk] + State.H2[pk] + State.H3[pk] + State.H4[pk];
+    const surf = State.surfaceField[pk];
     if (surf < Globals.seaLevel) {
       if (State.iceLayer[pk] > 0.2) return 'Морской лёд';
       else return t < ICE_TEMP ? 'Ледяной океан' : 'Океан';
@@ -228,7 +228,7 @@ export function periodicUI(now) {
 function sampleHistory() {
   let landCount = 0, snowCount = 0, iceCount = 0, aqSum = 0;
   for (let k = 0; k < N * N; k++) {
-    const s = State.H1[k] + State.H2[k] + State.H3[k] + State.H4[k];
+    const s = State.surfaceField[k];
     if (s > Globals.seaLevel) { landCount++; aqSum += State.Aq[k]; }
     if (State.snowLayer[k] > 0.1) snowCount++;
     if (State.iceLayer[k] > 0.1) iceCount++;
@@ -249,7 +249,7 @@ function sampleStats() {
   let tAvg = 0, hAvg = 0;
   let land = 0, snowCells = 0, iceCells = 0, iceTotal = 0, aqSum = 0, aqMax = 0, lavaSum = 0;
   for (let k = 0; k < N * N; k++) {
-    const h = State.H1[k] + State.H2[k] + State.H3[k] + State.H4[k];
+    const h = State.surfaceField[k];
     if (h < mn) mn = h; if (h > mx) mx = h;
     s1 += State.H1[k]; s2 += State.H2[k]; s3 += State.H3[k]; s4 += State.H4[k];
     sw += State.W[k];

@@ -7,7 +7,7 @@ const { SLIDE_K, DIFF_K, K_CAP, K_ERODE, K_ERODE_ROCK, K_DEPOSIT, MAX_ERODE,
         EVAP, K_RIVER_ERODE } = EROSION;
 const { FILL_RATE: LAKE_FILL_RATE, DRAIN_RATE: LAKE_DRAIN_RATE } = LAKES;
 const { K_DRAIN_ROUTING } = HYDROLOGY;
-import { State, Globals, H1, H2, H3, H4, H1t, H2t, H3t, H4t } from './state.js';
+import { State, Globals, H1, H2, H3, H4, H1t, H2t, H3t, H4t, surfaceField } from './state.js';
 
 // Move sediment between a pair of cells until both sit within TALUS[i] of each other,
 // layer-by-layer from soft soil down to hard rock. Also diffuse H1 between neighbours.
@@ -62,7 +62,7 @@ export function riverErosion(dt) {
     const i = k % N, j = (k / N) | 0;
     const iE = (i + 1) % N, iW = (i - 1 + N) % N;
     const jN = (j + 1) % N, jS = (j - 1 + N) % N;
-    const g = kk => H1[kk] + H2[kk] + H3[kk] + H4[kk];
+    const g = kk => surfaceField[kk];
     const dhdx = (g(j * N + iE) - g(j * N + iW)) / (2 * cellSize);
     const dhdz = (g(jN * N + i) - g(jS * N + i)) / (2 * cellSize);
     const slope = Math.hypot(dhdx, dhdz);
@@ -104,7 +104,7 @@ export function evaporate(dt) {
 // Ocean cells are clamped to sea level; lakes fill/drain toward spill level.
 export function applyLakes(dt) {
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     if (surface < Globals.seaLevel) {
       State.W[k] = Globals.seaLevel - surface;
     } else {

@@ -9,7 +9,7 @@ const { SHADOW_STEPS, SHADOW_K,
         OCEAN_CURRENT_RANGE, COLD_CURRENT, WARM_CURRENT,
         SEA_TEMP_GAIN, SEA_SMOOTH, T_REF_ALPHA,
         SEA_LEVEL_MIN, SEA_LEVEL_MAX } = CLIMATE;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { fbmTorus } from './noise.js';
 
 // Wind direction at latitude j — pure function, exported for wind/ice modules too.
@@ -23,7 +23,7 @@ export function computeClimate(t) {
   State.humDist.fill(1e9);
   let head = 0, tail = 0;
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     if (surface < Globals.seaLevel || State.W[k] > 0.05 || State.iceLayer[k] > 0.05) {
       State.humDist[k] = 0;
       State.bfsQueue[tail++] = k;
@@ -49,13 +49,13 @@ export function computeClimate(t) {
     const stepZ = wZ * 4;
     for (let i = 0; i < N; i++) {
       const k = j * N + i;
-      const h = H1[k] + H2[k] + H3[k] + H4[k];
+      const h = surfaceField[k];
       let maxBarrier = 0;
       for (let s = 1; s <= SHADOW_STEPS; s++) {
         const ni = ((i - Math.round(stepX * s)) % N + N) % N;
         const nj = ((j - Math.round(stepZ * s)) % N + N) % N;
         const nk = nj * N + ni;
-        const nh = H1[nk] + H2[nk] + H3[nk] + H4[nk];
+        const nh = surfaceField[nk];
         const barrier = nh - h;
         if (barrier > maxBarrier) maxBarrier = barrier;
       }
@@ -81,7 +81,7 @@ export function computeClimate(t) {
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const k = j * N + i;
-      const surface = H1[k] + H2[k] + H3[k] + H4[k];
+      const surface = surfaceField[k];
       if (surface > Globals.seaLevel - 2) continue;
       let westLand = false, eastLand = false;
       for (let s = 1; s <= OCEAN_CURRENT_RANGE; s++) {
@@ -102,7 +102,7 @@ export function computeClimate(t) {
     const z = ((k / N) | 0) * cellSize;
     const zShift = z + seasonOffset;
     const lat = 0.5 + 0.5 * Math.cos(TAU * zShift / L);
-    const h = H1[k] + H2[k] + H3[k] + H4[k];
+    const h = surfaceField[k];
     const alt = Math.max(0, h) / 80;
     let t2 = lat * (1 - TEMP_ALT_LAPSE * alt) + State.currentT[k];
     t2 += State.eruptHeat[k] * 0.35;

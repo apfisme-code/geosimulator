@@ -4,7 +4,7 @@
 import { GRID, ICE } from './constants.js';
 const { N, L, cellSize } = GRID;
 const { AQ_MAX, ICE_FREEBORD_RATIO } = ICE;
-import { State, Globals, H1, H2, H3, H4 } from './state.js';
+import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { fbmTorus } from './noise.js';
 
 // Soil: thinner underwater, modulated by FBM noise.
@@ -40,7 +40,7 @@ export function initSoftRock(idx) {
 // Underwater lithification is much faster (sediment compaction).
 export function lithify(dt) {
   for (let k = 0; k < N * N; k++) {
-    const surface = H1[k] + H2[k] + H3[k] + H4[k];
+    const surface = surfaceField[k];
     const isUnderwater = surface < Globals.seaLevel;
     const lithH1 = isUnderwater ? 0.008 : 0.0003;
     const lithH2 = isUnderwater ? 0.004 : 0.0003;
@@ -88,7 +88,7 @@ export function sampleHeight(x, z) {
   const i1 = (i0 + 1) % N, j1 = (j0 + 1) % N;
   const tx = fx - Math.floor(fx), tz = fz - Math.floor(fz);
   const top = k => {
-    const s = H1[k] + H2[k] + H3[k] + H4[k];
+    const s = surfaceField[k];
     if (s > Globals.seaLevel) return s + State.snowLayer[k];
     if (State.iceLayer[k] > 0.05) {
       return Globals.seaLevel + ICE_FREEBORD_RATIO * State.iceLayer[k] + State.snowLayer[k];
