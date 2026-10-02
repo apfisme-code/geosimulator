@@ -1,14 +1,12 @@
 // Erosion: talus sliding, diffusion, transport-limited river erosion,
 // evaporation, lake filling/draining. Pure mutation of the height stack.
 
-import {
-  N, cellSize,
-  TALUS, SLIDE_K, DIFF_K,
-  K_CAP, K_ERODE, K_ERODE_ROCK, K_DEPOSIT, MAX_ERODE,
-  EVAP, LAKE_FILL_RATE, LAKE_DRAIN_RATE,
-  K_RIVER_ERODE, K_DRAIN_ROUTING,
-} from './constants.js';
-import { smoothstep } from './constants.js';
+import { GRID, EROSION, LAKES, HYDROLOGY } from './constants.js';
+const { N, cellSize, TALUS, smoothstep } = GRID;
+const { SLIDE_K, DIFF_K, K_CAP, K_ERODE, K_ERODE_ROCK, K_DEPOSIT, MAX_ERODE,
+        EVAP, K_RIVER_ERODE } = EROSION;
+const { FILL_RATE: LAKE_FILL_RATE, DRAIN_RATE: LAKE_DRAIN_RATE } = LAKES;
+const { K_DRAIN_ROUTING } = HYDROLOGY;
 import { State, Globals, H1, H2, H3, H4, H1t, H2t, H3t, H4t } from './state.js';
 
 // Move sediment between a pair of cells until both sit within TALUS[i] of each other,

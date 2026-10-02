@@ -1,10 +1,13 @@
 // HUD, slice preview and history graphs. Pure DOM/Canvas2D code —
 // reads from State/Globals, doesn't write back.
 
-import {
-  N, cellSize, L, TAU, HIST_LEN, OVERLAY_NAMES, ASH_LAYER_MAX,
-  DRIFT_INTERVAL, ICE_TEMP, SNOW_TEMP, MAX_PLATES, SEA_LEVEL_MIN, SEA_LEVEL_MAX,
-} from './constants.js';
+import { GRID, SIM, CLIMATE, VOLCANO, OVERLAY, PLATES } from './constants.js';
+const { N, cellSize, L } = GRID;
+const { DRIFT_INTERVAL } = SIM;
+const { ICE_TEMP, SNOW_TEMP, SEA_LEVEL_MIN, SEA_LEVEL_MAX } = CLIMATE;
+const { ASH_LAYER_MAX } = VOLCANO;
+const { HIST_LEN, NAMES: OVERLAY_NAMES } = OVERLAY;
+const { MAX: MAX_PLATES } = PLATES;
 import { State, Globals } from './state.js';
 import { countActivePlates } from './plates.js';
 import { player } from './player.js';

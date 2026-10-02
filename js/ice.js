@@ -1,13 +1,13 @@
 // Snow / sea ice / glacier step: growth, melt, compaction, and the small
 // "Aq + W" boost that feeds meltwater back into rivers and aquifers.
 
-import {
-  N, cellSize,
-  ICE_TEMP, ICE_FORM_RATE, ICE_MELT_RATE, ICE_MAX_LAYER,
-  SNOW_TEMP, MELT_BAND_T, ICE_ACCUM, MELT_RATE, SNOW_MAX,
-  SNOW_COMPACT_RATE, SNOW_TO_ICE_RATIO,
-  MELT_TO_W, MELT_TO_AQ, AQ_MAX, smoothstep,
-} from './constants.js';
+import { GRID, CLIMATE, ICE } from './constants.js';
+const { N, cellSize } = GRID;
+const { ICE_TEMP, SNOW_TEMP, MELT_BAND_T } = CLIMATE;
+const { ICE_FORM_RATE, ICE_MELT_RATE, ICE_MAX_LAYER,
+        SNOW_MAX, ICE_ACCUM, MELT_RATE,
+        SNOW_COMPACT_RATE, SNOW_TO_ICE_RATIO,
+        MELT_TO_W, MELT_TO_AQ, AQ_MAX } = ICE;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 
 // One combined step covering sea-ice growth/melt, snow accumulation/melt,

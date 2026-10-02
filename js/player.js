@@ -1,11 +1,12 @@
 // First-person controller: WASD movement on the torus, pointer-lock look,
 // jump/gravity, and the global key bindings (overlay/pause/restart/…).
 
-import { L, EYE, GRAVITY, JUMP_V, SPEED_WALK, SPEED_RUN } from './constants.js';
-import { wrap } from './constants.js';
+import { GRID, PLAYER, OVERLAY } from './constants.js';
+const { L, wrap } = GRID;
+const { EYE, GRAVITY, JUMP_V, SPEED_WALK, SPEED_RUN } = PLAYER;
+const { COUNT: OVERLAY_COUNT, NAMES: OVERLAY_NAMES } = OVERLAY;
 import { State, Globals } from './state.js';
 import { resetTerrain } from './sim.js';
-import { OVERLAY_COUNT, OVERLAY_NAMES } from './constants.js';
 import { terrainMat, waterMat, renderer } from './render.js';
 import { sampleHeight } from './surface.js';
 

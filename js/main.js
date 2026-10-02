@@ -1,7 +1,8 @@
 // Entry point. Initialises the world, wires the requestAnimationFrame loop,
 // and ties together simulation, render, player, and UI updates.
 
-import { EYE } from './constants.js';
+import { PLAYER } from './constants.js';
+const { EYE } = PLAYER;
 import { Globals } from './state.js';
 import { resetTerrain, simulate } from './sim.js';
 import { sampleHeight } from './surface.js';

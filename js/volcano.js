@@ -2,14 +2,13 @@
 // and deposit lava + ash + heat. Lava goes into both H4 and lavaBonus so the
 // relaxation step can't smooth the cone away.
 
-import {
-  N, SEA_LEVEL_MIN,
-  PLUME_COUNT,
-  PLUME_ERUPT_MIN, PLUME_ERUPT_MAX,
-  CRATER_SIG, CRATER_REACH, LAVA_VOLUME,
-  HEAT_RADIUS, HEAT_AMOUNT, HEAT_DECAY,
-  ASH_SIG, ASH_VOLUME, ASH_LAYER_MAX,
-} from './constants.js';
+import { GRID, CLIMATE, VOLCANO } from './constants.js';
+const { N } = GRID;
+const { SEA_LEVEL_MIN } = CLIMATE;
+const { PLUME_COUNT, ERUPT_MIN: PLUME_ERUPT_MIN, ERUPT_MAX: PLUME_ERUPT_MAX,
+        CRATER_SIG, CRATER_REACH, LAVA_VOLUME,
+        HEAT_RADIUS, HEAT_AMOUNT, HEAT_DECAY,
+        ASH_SIG, ASH_VOLUME, ASH_LAYER_MAX } = VOLCANO;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 
 // Initial plume placement: anywhere above sea level with a minimum spacing.

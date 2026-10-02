@@ -1,13 +1,12 @@
 // Hydrology: terrain fill (so lakes find their spill), D8 flow routing
 // with priority-flood, river accumulation, water and aquifer advection.
 
-import {
-  N, TAU,
-  FILL_EPS, K_DRAIN_ROUTING, NBUCKETS,
-  K_FLOW, AQ_FLOW,
-  SEA_LEVEL_MIN,
-} from './constants.js';
-import { DIRS } from './constants.js';
+import { GRID, CLIMATE, HYDROLOGY, ICE, EROSION } from './constants.js';
+const { N, DIRS } = GRID;
+const { FILL_EPS, K_DRAIN_ROUTING, NBUCKETS } = HYDROLOGY;
+const { AQ_FLOW } = ICE;
+const { K_FLOW } = EROSION;
+const { SEA_LEVEL_MIN } = CLIMATE;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 
 // ---------- Priority-flood spill levels ----------

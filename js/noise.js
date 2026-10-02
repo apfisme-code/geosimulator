@@ -1,7 +1,8 @@
 // 4D value noise + FBM on the torus.
 // All functions are pure — they only read the seed passed in.
 
-import { L, TAU } from './constants.js';
+import { GRID } from './constants.js';
+const { L, TAU } = GRID;
 import { fade } from './utils.js';
 
 export function hash4(x, y, z, w, seed) {

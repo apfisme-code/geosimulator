@@ -1,20 +1,22 @@
 // Tectonic plates: Worley noise for ownership, drift, lifecycle,
 // boundary-driven ridges/trenches/arcs, mantle field, target surface.
 
-import {
-  N, cellSize, TAU, L, wrap, wrapRel,
-  MAX_PLATES, PLATE_COUNT, OCEAN_FRACTION,
+import { GRID, PLATES } from './constants.js';
+const { N, cellSize, TAU, L, wrap, wrapRel } = GRID;
+const {
+  COUNT: PLATE_COUNT, MAX: MAX_PLATES,
+  OCEAN_FRACTION,
   CONT_TARGET_MIN, CONT_TARGET_MAX, OCEAN_TARGET_MIN, OCEAN_TARGET_MAX,
   MIN_PLATE_AREA, SPLIT_AREA_MIN, SPLIT_PROB,
   SPLIT_MANTLE_MIN, SPLIT_OFFSET_MIN, SPLIT_OFFSET_MAX,
   BLEND_WIDTH, RIDGE_WIDTH,
   RIDGE_MAX, RIFT_MAX, TRENCH_MAX, ARC_MAX, ARC_OFFSET, ARC_SIG,
   TRENCH_SIG, MID_RIDGE_MAX, AXIAL_RIFT_MAX,
-  PLATE_VN_SCALE, VN_THRESHOLD,
+  VN_SCALE: PLATE_VN_SCALE, VN_THRESHOLD,
   DETAIL_AMP, DETAIL_FREQ, DETAIL_OCT,
   PLATEAU_MAX, PLATEAU_OFFSET, PLATEAU_SIG,
   MANTLE_DRIFT,
-} from './constants.js';
+} = PLATES;
 import { State, Globals } from './state.js';
 import { vnoise4, fbmTorus } from './noise.js';
 

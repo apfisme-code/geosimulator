@@ -2,11 +2,12 @@
 // with optional `every` (run every N simulation ticks). Each step takes
 // (dt, t, stepCount) and mutates State / Globals in place.
 
-import {
-  N, RELAX_K, MANTLE_RATE,
-  DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL, CLIMATE_INTERVAL,
-  AQ_FLOW_INTERVAL, AQ_MAX, L, BLEND_WIDTH,
-} from './constants.js';
+import { GRID, SIM, ICE, PLATES } from './constants.js';
+const { N, L, BLEND_WIDTH } = GRID;
+const { DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL,
+        CLIMATE_INTERVAL, AQ_FLOW_INTERVAL } = SIM;
+const { AQ_MAX } = ICE;
+const { RELAX_K, MANTLE_RATE } = PLATES;
 import { State, Globals, resetCounters, H1, H2, H3, H4 } from './state.js';
 import { bilinearWrap } from './utils.js';
 import {

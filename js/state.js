@@ -3,10 +3,12 @@
 // and can mutate entries (Float32Array[i] = …, .set, .fill) without
 // re-binding the top-level name.
 
-import {
-  N, MAX_PLATES, NBUCKETS, HIST_LEN,
-  PLATE_COUNT, AQ_MAX,
-} from './constants.js';
+import { GRID, HYDROLOGY, OVERLAY, ICE, PLATES } from './constants.js';
+const { N } = GRID;
+const { NBUCKETS } = HYDROLOGY;
+const { HIST_LEN } = OVERLAY;
+const { AQ_MAX } = ICE;
+const { MAX: MAX_PLATES } = PLATES;
 
 // ---------- Terrain layers (soil/gravel/soft rock/hard rock) ----------
 const H1   = new Float32Array(N * N);
@@ -210,5 +212,5 @@ export function resetCounters() {
   Globals.lastEruption = { i: -1, j: -1, t: -1e9, underwater: false };
 }
 
-// Export pieces used in many places
-export { AQ_MAX, PLATE_COUNT };
+// Re-export pieces used in many places
+export { AQ_MAX };

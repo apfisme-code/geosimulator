@@ -1,8 +1,11 @@
 // Wind: advect suspended sediment, then erode or deposit against the
 // transport capacity dictated by the local slope and humidity.
 
-import { N, cellSize, WIND_SPEED, WIND_CAP_BASE, WIND_CAP_SLOPE,
-         K_WIND_ERODE, K_WIND_DEPOSIT, MAX_WIND_ERODE } from './constants.js';
+import { GRID, WIND } from './constants.js';
+const { N, cellSize } = GRID;
+const { SPEED: WIND_SPEED, CAP_BASE: WIND_CAP_BASE, CAP_SLOPE: WIND_CAP_SLOPE,
+        K_ERODE: K_WIND_ERODE, K_DEPOSIT: K_WIND_DEPOSIT,
+        MAX_ERODE: MAX_WIND_ERODE } = WIND;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { windDirX, windDirZ } from './climate.js';
 

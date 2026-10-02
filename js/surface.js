@@ -1,10 +1,9 @@
 // Surface processes: lithification (H1→H2→H3→H4) and weathering (reverse),
 // plus the soil/gravel/soft-rock initialisers.
 
-import {
-  N, L, cellSize, AQ_MAX,
-  ICE_FREEBORD_RATIO,
-} from './constants.js';
+import { GRID, ICE } from './constants.js';
+const { N, L, cellSize } = GRID;
+const { AQ_MAX, ICE_FREEBORD_RATIO } = ICE;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { fbmTorus } from './noise.js';
 

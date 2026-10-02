@@ -3,9 +3,9 @@
 // the player on the toroidal world.
 
 import * as THREE from 'three';
-import {
-  N, NV, NV1, L, SUBDIV, cellSize, ASH_LAYER_MAX,
-} from './constants.js';
+import { GRID, VOLCANO } from './constants.js';
+const { N, NV, NV1, L, cellSize } = GRID;
+const { ASH_LAYER_MAX } = VOLCANO;
 import { State, Globals } from './state.js';
 
 // ---------- Texture buffers ----------

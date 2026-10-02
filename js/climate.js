@@ -1,16 +1,14 @@
 // Climate: humidity BFS from water/ice edges, rain shadow along wind,
 // ocean currents, seasonal temperature, and adaptive sea level.
 
-import {
-  N, cellSize, TAU, L,
-  SHADOW_STEPS, SHADOW_K,
-  HUMIDITY_FALLOFF, TEMP_ALT_LAPSE,
-  SEASON_AMP, SEASON_RATE,
-  OCEAN_CURRENT_RANGE, COLD_CURRENT, WARM_CURRENT,
-  SEA_TEMP_GAIN, SEA_SMOOTH, T_REF_ALPHA,
-  SEA_LEVEL_MIN, SEA_LEVEL_MAX,
-} from './constants.js';
-import { DIRS } from './constants.js';
+import { GRID, CLIMATE } from './constants.js';
+const { N, cellSize, TAU, L, DIRS } = GRID;
+const { SHADOW_STEPS, SHADOW_K,
+        HUMIDITY_FALLOFF, TEMP_ALT_LAPSE,
+        SEASON_AMP, SEASON_RATE,
+        OCEAN_CURRENT_RANGE, COLD_CURRENT, WARM_CURRENT,
+        SEA_TEMP_GAIN, SEA_SMOOTH, T_REF_ALPHA,
+        SEA_LEVEL_MIN, SEA_LEVEL_MAX } = CLIMATE;
 import { State, Globals, H1, H2, H3, H4 } from './state.js';
 import { fbmTorus } from './noise.js';
 
