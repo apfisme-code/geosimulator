@@ -1,12 +1,11 @@
 // Hydrology: terrain fill (so lakes find their spill), D8 flow routing
 // with priority-flood, river accumulation, water and aquifer advection.
 
-import { GRID, CLIMATE, HYDROLOGY, ICE, EROSION } from './constants.js';
+import { GRID, HYDROLOGY, ICE, EROSION } from './constants.js';
 const { N, DIRS } = GRID;
 const { FILL_EPS, K_DRAIN_ROUTING, NBUCKETS } = HYDROLOGY;
 const { AQ_FLOW } = ICE;
 const { K_FLOW } = EROSION;
-const { SEA_LEVEL_MIN } = CLIMATE;
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
 // ---------- Priority-flood spill levels ----------
@@ -137,9 +136,17 @@ export function computeFlowRouting() {
   }
 
   // 3. Bucket cells by filled height for top-down accumulation.
+  // Dynamic hMin/hMax from the actual filled terrain — hardcoded values
+  // got exceeded by tall volcanoes + lavaBonus and crammed half the
+  // world into the last bucket, breaking the top-down accumulation order.
+  let hMin = Infinity, hMax = -Infinity;
+  for (let k = 0; k < N * N; k++) {
+    const h = State.bucketData[k];
+    if (h < hMin) hMin = h;
+    if (h > hMax) hMax = h;
+  }
   State.bucketHead.fill(-1);
-  const hMin = SEA_LEVEL_MIN - 5, hMax = 100;
-  const hRange = hMax - hMin;
+  const hRange = hMax - hMin || 1;
   for (let k = 0; k < N * N; k++) {
     const h = State.bucketData[k];
     let b = Math.floor((h - hMin) / hRange * NBUCKETS);
