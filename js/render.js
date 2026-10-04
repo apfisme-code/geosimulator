@@ -136,29 +136,29 @@ const terrainVS = `
   uniform float uWaterMix;
   uniform float uSeaLevel;
 
-  varying vec3  vWorld;
-  varying vec3  vNormalW;
-  varying float vH;
-  varying float vW;
-  varying float vWind;
-  varying float vDrainage;
-  varying float vTemp;
-  varying float vHum;
-  varying float vHeat;
-  varying float vAsh;
-  varying float vIce;
-  varying float vSnow;
-  varying float vMantle;
-  varying float vAq;
+  out vec3  vWorld;
+  out vec3  vNormalW;
+  out float vH;
+  out float vW;
+  out float vWind;
+  out float vDrainage;
+  out float vTemp;
+  out float vHum;
+  out float vHeat;
+  out float vAsh;
+  out float vIce;
+  out float vSnow;
+  out float vMantle;
+  out float vAq;
 
   void main() {
     vec2 uvc = uv;
-    vec4 h4  = texture2D(texH, uvc);
-    vec2 wt  = texture2D(texW, uvc).rg;
-    vec4 aux = texture2D(texAux, uvc);
-    vec4 vol = texture2D(texVol, uvc);
-    float mantle = texture2D(texMantle, uvc).r;
-    float aq = texture2D(texAq, uvc).r;
+    vec4 h4  = texture(texH, uvc);
+    vec2 wt  = texture(texW, uvc).rg;
+    vec4 aux = texture(texAux, uvc);
+    vec4 vol = texture(texVol, uvc);
+    float mantle = texture(texMantle, uvc).r;
+    float aq = texture(texAq, uvc).r;
 
     float w   = wt.r;
     float t   = wt.g;
@@ -172,10 +172,10 @@ const terrainVS = `
     pos.y = surface + snowOnLand;
 
     float e = uTexel.x;
-    vec4 hL = texture2D(texH, uvc - vec2(e, 0.0));
-    vec4 hR = texture2D(texH, uvc + vec2(e, 0.0));
-    vec4 hD = texture2D(texH, uvc - vec2(0.0, e));
-    vec4 hU = texture2D(texH, uvc + vec2(0.0, e));
+    vec4 hL = texture(texH, uvc - vec2(e, 0.0));
+    vec4 hR = texture(texH, uvc + vec2(e, 0.0));
+    vec4 hD = texture(texH, uvc - vec2(0.0, e));
+    vec4 hU = texture(texH, uvc + vec2(0.0, e));
     float dHdx = ((hR.x+hR.y+hR.z+hR.w) - (hL.x+hL.y+hL.z+hL.w)) / (2.0 * uCellSize);
     float dHdz = ((hU.x+hU.y+hU.z+hU.w) - (hD.x+hD.y+hD.z+hD.w)) / (2.0 * uCellSize);
     vec3 nrm = normalize(vec3(-dHdx, 1.0, -dHdz));
@@ -214,25 +214,25 @@ const waterVS = `
   uniform float uWaterMix;
   uniform float uSeaLevel;
 
-  varying vec3  vWorld;
-  varying vec3  vNormalW;
-  varying float vW;
-  varying float vSed;
-  varying float vTemp;
-  varying float vHeat;
-  varying float vIce;
-  varying float vSnow;
-  varying float vH;
-  varying float vDrainage;
-  varying float vHum;
-  varying float vAq;
+  out vec3  vWorld;
+  out vec3  vNormalW;
+  out float vW;
+  out float vSed;
+  out float vTemp;
+  out float vHeat;
+  out float vIce;
+  out float vSnow;
+  out float vH;
+  out float vDrainage;
+  out float vHum;
+  out float vAq;
 
   void main() {
     vec2 uvc = uv;
-    vec4 h4  = texture2D(texH, uvc);
-    vec2 wt  = texture2D(texW, uvc).rg;
-    vec4 aux = texture2D(texAux, uvc);
-    vec4 vol = texture2D(texVol, uvc);
+    vec4 h4  = texture(texH, uvc);
+    vec2 wt  = texture(texW, uvc).rg;
+    vec4 aux = texture(texAux, uvc);
+    vec4 vol = texture(texVol, uvc);
 
     float w   = wt.r;
     float t   = wt.g;
@@ -247,10 +247,10 @@ const waterVS = `
     pos.y = uSeaLevel + hasIce * (0.08 * ice + snow);
 
     float e = uTexel.x;
-    vec4 hL = texture2D(texH, uvc - vec2(e, 0.0));
-    vec4 hR = texture2D(texH, uvc + vec2(e, 0.0));
-    vec4 hD = texture2D(texH, uvc - vec2(0.0, e));
-    vec4 hU = texture2D(texH, uvc + vec2(0.0, e));
+    vec4 hL = texture(texH, uvc - vec2(e, 0.0));
+    vec4 hR = texture(texH, uvc + vec2(e, 0.0));
+    vec4 hD = texture(texH, uvc - vec2(0.0, e));
+    vec4 hU = texture(texH, uvc + vec2(0.0, e));
     float dHdx = ((hR.x+hR.y+hR.z+hR.w) - (hL.x+hL.y+hL.z+hL.w)) / (2.0 * uCellSize);
     float dHdz = ((hU.x+hU.y+hU.z+hU.w) - (hD.x+hD.y+hD.z+hD.w)) / (2.0 * uCellSize);
     vec3 nrm = normalize(vec3(-dHdx, 1.0, -dHdz));
@@ -268,7 +268,7 @@ const waterVS = `
     vH   = h4.x + h4.y + h4.z + h4.w;
     vDrainage = aux.z;
     vHum = aux.w;
-    vAq = texture2D(texAq, uvc).r;
+    vAq = texture(texAq, uvc).r;
 
     gl_Position = projectionMatrix * viewMatrix * world;
   }
@@ -280,20 +280,22 @@ const terrainFS = `
   uniform vec3  uSunColor;
   uniform int   uOverlayMode;
 
-  varying vec3  vWorld;
-  varying vec3  vNormalW;
-  varying float vH;
-  varying float vW;
-  varying float vWind;
-  varying float vDrainage;
-  varying float vTemp;
-  varying float vHum;
-  varying float vHeat;
-  varying float vAsh;
-  varying float vIce;
-  varying float vSnow;
-  varying float vMantle;
-  varying float vAq;
+  in vec3  vWorld;
+  in vec3  vNormalW;
+  in float vH;
+  in float vW;
+  in float vWind;
+  in float vDrainage;
+  in float vTemp;
+  in float vHum;
+  in float vHeat;
+  in float vAsh;
+  in float vIce;
+  in float vSnow;
+  in float vMantle;
+  in float vAq;
+
+  out vec4 fragColor;
 
   vec3 biomeColor(float t, float h) {
     vec3 ice     = vec3(0.92, 0.95, 1.00);
@@ -410,7 +412,7 @@ const terrainFS = `
       colOut += vec3(1.0, 0.45, 0.1) * vHeat * vHeat * 1.5;
     }
 
-    gl_FragColor = vec4(colOut, 1.0);
+    fragColor = vec4(colOut, 1.0);
   }
 `;
 
@@ -420,18 +422,20 @@ const waterFS = `
   uniform vec3  uSunColor;
   uniform vec3  uCamera;
   uniform int   uOverlayMode;
-  varying vec3  vWorld;
-  varying vec3  vNormalW;
-  varying float vW;
-  varying float vSed;
-  varying float vTemp;
-  varying float vHeat;
-  varying float vIce;
-  varying float vSnow;
-  varying float vH;
-  varying float vDrainage;
-  varying float vHum;
-  varying float vAq;
+  in vec3  vWorld;
+  in vec3  vNormalW;
+  in float vW;
+  in float vSed;
+  in float vTemp;
+  in float vHeat;
+  in float vIce;
+  in float vSnow;
+  in float vH;
+  in float vDrainage;
+  in float vHum;
+  in float vAq;
+
+  out vec4 fragColor;
 
   void main() {
     if (vW < 0.0003 && vIce < 0.02) discard;
@@ -454,7 +458,7 @@ const waterFS = `
       else if (uOverlayMode == 6) col = mix(vec3(0.10, 0.15, 0.30), vec3(0.55, 0.85, 1.0), clamp(vIce / 2.0, 0.0, 1.0));
       else if (uOverlayMode == 8) col = mix(vec3(0.55, 0.42, 0.25), vec3(0.15, 0.65, 0.85), clamp(vAq / 0.5, 0.0, 1.0));
       else col = vec3(0.2);
-      gl_FragColor = vec4(col * (0.5 + diff * 0.3), 0.75);
+      fragColor = vec4(col * (0.5 + diff * 0.3), 0.75);
       return;
     }
 
@@ -466,7 +470,7 @@ const waterFS = `
       vec3 colOut = iceCol * (uAmbient + uSunColor * diff);
       colOut += vec3(0.85, 0.92, 1.0) * spec * 0.7;
       if (vHeat > 0.02) colOut = mix(colOut, vec3(0.7, 0.35, 0.25), vHeat * 0.5);
-      gl_FragColor = vec4(colOut, 1.0);
+      fragColor = vec4(colOut, 1.0);
       return;
     }
 
@@ -481,7 +485,7 @@ const waterFS = `
     col += vec3(0.81, 0.89, 1.0) * spec * 0.9;
     float alpha = clamp(sqrt(vW * 2.0), 0.0, 0.85);
     alpha = max(alpha, clamp(vW * 25.0, 0.0, 0.85));
-    gl_FragColor = vec4(col, alpha);
+    fragColor = vec4(col, alpha);
   }
 `;
 
@@ -505,6 +509,7 @@ scene.add(sun);
 
 // ---------- Materials ----------
 export const terrainMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
   uniforms: {
     texH:      { value: texH },
     texW:      { value: texW },
@@ -526,6 +531,7 @@ export const terrainMat = new THREE.ShaderMaterial({
 });
 
 export const waterMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
   uniforms: {
     texH:      { value: texH },
     texW:      { value: texW },
