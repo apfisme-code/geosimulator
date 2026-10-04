@@ -115,7 +115,16 @@ function buildGridGeometry() {
 }
 
 // ---------- Shaders ----------
-const commonVS = `
+// Two vertex shaders sharing the same uniforms. They differ in the
+// varying set: terrainFS needs the soil-layer, plate-tectonics and
+// atmosphere overlays; waterFS only needs the water/ice/snow + ocean
+// climate channels. Keeping them separate means the water geometry
+// pays zero cost for the extra 4 varyings it would otherwise carry.
+//
+// Both compute surface from the height-stack texture (sum of H1..H4),
+// set `pos.y` differently for land vs sea/ice, and write a world-space
+// normal from the cross-cell height gradient.
+const terrainVS = `
   uniform sampler2D texH;
   uniform sampler2D texW;
   uniform sampler2D texAux;
@@ -130,9 +139,7 @@ const commonVS = `
   varying vec3  vWorld;
   varying vec3  vNormalW;
   varying float vH;
-  varying float vH1;
   varying float vW;
-  varying float vSed;
   varying float vWind;
   varying float vDrainage;
   varying float vTemp;
@@ -161,35 +168,23 @@ const commonVS = `
     float surface = h4.x + h4.y + h4.z + h4.w;
 
     vec3 pos = position;
-    if (uWaterMix < 0.5) {
-      float snowOnLand = surface > uSeaLevel ? snow : 0.0;
-      pos.y = surface + snowOnLand;
-    } else {
-      float hasIce = step(0.02, ice);
-      pos.y = uSeaLevel + hasIce * (0.08 * ice + snow);
-    }
+    float snowOnLand = surface > uSeaLevel ? snow : 0.0;
+    pos.y = surface + snowOnLand;
 
     float e = uTexel.x;
     vec4 hL = texture2D(texH, uvc - vec2(e, 0.0));
     vec4 hR = texture2D(texH, uvc + vec2(e, 0.0));
     vec4 hD = texture2D(texH, uvc - vec2(0.0, e));
     vec4 hU = texture2D(texH, uvc + vec2(0.0, e));
-    float hLsum = hL.x+hL.y+hL.z+hL.w;
-    float hRsum = hR.x+hR.y+hR.z+hR.w;
-    float hDsum = hD.x+hD.y+hD.z+hD.w;
-    float hUsum = hU.x+hU.y+hU.z+hU.w;
-
-    float dHdx = (hRsum - hLsum) / (2.0 * uCellSize);
-    float dHdz = (hUsum - hDsum) / (2.0 * uCellSize);
+    float dHdx = ((hR.x+hR.y+hR.z+hR.w) - (hL.x+hL.y+hL.z+hL.w)) / (2.0 * uCellSize);
+    float dHdz = ((hU.x+hU.y+hU.z+hU.w) - (hD.x+hD.y+hD.z+hD.w)) / (2.0 * uCellSize);
     vec3 nrm = normalize(vec3(-dHdx, 1.0, -dHdz));
 
     vec4 world = modelMatrix * vec4(pos, 1.0);
     vWorld   = world.xyz;
     vNormalW = normalize(mat3(modelMatrix) * nrm);
     vH   = surface;
-    vH1  = h4.x;
     vW   = w;
-    vSed = aux.x;
     vWind = aux.y;
     vDrainage = aux.z;
     vTemp = t;
@@ -205,6 +200,77 @@ const commonVS = `
   }
 `;
 
+const waterVS = `
+  uniform sampler2D texH;
+  uniform sampler2D texW;
+  uniform sampler2D texAux;
+  uniform sampler2D texVol;
+  uniform sampler2D texMantle;
+  uniform sampler2D texAq;
+  uniform vec2 uTexel;
+  uniform float uCellSize;
+  uniform float uWaterMix;
+  uniform float uSeaLevel;
+
+  varying vec3  vWorld;
+  varying vec3  vNormalW;
+  varying float vW;
+  varying float vSed;
+  varying float vTemp;
+  varying float vHeat;
+  varying float vIce;
+  varying float vSnow;
+  varying float vH;
+  varying float vDrainage;
+  varying float vHum;
+  varying float vAq;
+
+  void main() {
+    vec2 uvc = uv;
+    vec4 h4  = texture2D(texH, uvc);
+    vec2 wt  = texture2D(texW, uvc).rg;
+    vec4 aux = texture2D(texAux, uvc);
+    vec4 vol = texture2D(texVol, uvc);
+
+    float w   = wt.r;
+    float t   = wt.g;
+    float ice = vol.b;
+    float snow= vol.a;
+
+    // Water doesn't need the soil/tectonics varyings (no vH1, vWind,
+    // vAsh, vMantle). The visible water surface is always sea level
+    // (with freeboard from sea-ice).
+    vec3 pos = position;
+    float hasIce = step(0.02, ice);
+    pos.y = uSeaLevel + hasIce * (0.08 * ice + snow);
+
+    float e = uTexel.x;
+    vec4 hL = texture2D(texH, uvc - vec2(e, 0.0));
+    vec4 hR = texture2D(texH, uvc + vec2(e, 0.0));
+    vec4 hD = texture2D(texH, uvc - vec2(0.0, e));
+    vec4 hU = texture2D(texH, uvc + vec2(0.0, e));
+    float dHdx = ((hR.x+hR.y+hR.z+hR.w) - (hL.x+hL.y+hL.z+hL.w)) / (2.0 * uCellSize);
+    float dHdz = ((hU.x+hU.y+hU.z+hU.w) - (hD.x+hD.y+hD.z+hD.w)) / (2.0 * uCellSize);
+    vec3 nrm = normalize(vec3(-dHdx, 1.0, -dHdz));
+
+    vec4 world = modelMatrix * vec4(pos, 1.0);
+    vWorld   = world.xyz;
+    vNormalW = normalize(mat3(modelMatrix) * nrm);
+    vW   = w;
+    vSed = aux.x;
+    vTemp = t;
+    vHeat = vol.r;
+    vIce = ice;
+    vSnow = snow;
+    vH   = h4.x + h4.y + h4.z + h4.w;
+    vDrainage = aux.z;
+    vHum = aux.w;
+    vAq = texture2D(texAq, uvc).r;
+
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+
 const terrainFS = `
   uniform vec3  uLightDir;
   uniform vec3  uAmbient;
@@ -214,7 +280,6 @@ const terrainFS = `
   varying vec3  vWorld;
   varying vec3  vNormalW;
   varying float vH;
-  varying float vH1;
   varying float vW;
   varying float vWind;
   varying float vDrainage;
@@ -317,8 +382,6 @@ const terrainFS = `
       col = mix(col, riverColor, drain * drain * 0.45);
       float slope = 1.0 - normalize(vNormalW).y;
       col = mix(col, vec3(0.42, 0.38, 0.34), smoothstep(0.30, 0.70, slope) * 0.65);
-      if (vH1 < 0.3) col = mix(col, vec3(0.42, 0.38, 0.34),
-                               smoothstep(0.3, 0.05, vH1) * 0.65);
       if (vAsh > 0.02) col = mix(col, vec3(0.28, 0.25, 0.22), vAsh * 0.7);
       float dust = min(1.0, vWind * 60.0);
       if (dust > 0.02) col = mix(col, vec3(0.78, 0.66, 0.42), dust * 0.25);
@@ -455,7 +518,7 @@ export const terrainMat = new THREE.ShaderMaterial({
     uAmbient:  { value: new THREE.Color(0x405a80) },
     uSunColor: { value: new THREE.Color(0xfff0d0) },
   },
-  vertexShader: commonVS,
+  vertexShader: terrainVS,
   fragmentShader: terrainFS,
 });
 
@@ -477,7 +540,7 @@ export const waterMat = new THREE.ShaderMaterial({
     uSunColor: { value: new THREE.Color(0xfff0d0) },
     uCamera:   { value: new THREE.Vector3() },
   },
-  vertexShader: commonVS,
+  vertexShader: waterVS,
   fragmentShader: waterFS,
   transparent: true,
   depthWrite: false,
