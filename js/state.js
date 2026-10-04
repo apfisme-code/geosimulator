@@ -98,6 +98,13 @@ const plateF1       = new Float32Array(N * N);
 const plateF2       = new Float32Array(N * N);
 const plateK1       = new Int16Array(N * N);
 const plateK2       = new Int16Array(N * N);
+// Per-plate cell lists (CSR layout): for each k, plateCellsStart[k] is
+// the start index inside plateCellsIdx, plateCellsCount[k] is the length.
+// Lets updatePlateLifecycle scan only the cells that actually belong to
+// plate k instead of all N² cells.
+const plateCellsStart = new Int32Array(MAX_PLATES);
+const plateCellsCount = new Int32Array(MAX_PLATES);
+const plateCellsIdx   = new Int32Array(N * N);
 const plateH_A      = new Float32Array(N * N);
 const plateH_B      = new Float32Array(N * N);
 const plateTypeA    = new Int8Array(N * N);
@@ -145,6 +152,7 @@ export const State = {
   plateCX, plateCZ, plateH, plateType, plateHills,
   plateDriftVX, plateDriftVZ, plateActive, plateArea,
   plateF1, plateF2, plateK1, plateK2,
+  plateCellsStart, plateCellsCount, plateCellsIdx,
   plateH_A, plateH_B, plateTypeA, plateTypeB,
   plateHillsA, plateHillsB,
   targetSurface,

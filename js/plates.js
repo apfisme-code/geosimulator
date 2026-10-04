@@ -66,23 +66,26 @@ export function driftPlates(dts) {
 }
 
 // Per-step: deactivate tiny plates, occasionally split big ones.
+// plateCellsIdx (built by computeWorleyFields) gives O(area) scans
+// instead of O(N²) when looking for a plate's best mantle cell.
 export function updatePlateLifecycle() {
-  State.plateArea.fill(0);
-  for (let k = 0; k < N * N; k++) {
-    const k1 = State.plateK1[k];
-    if (k1 >= 0 && State.plateActive[k1]) State.plateArea[k1]++;
-  }
+  // 1. Deactivate tiny plates using plateCellsCount[k] as the area.
   for (let k = 0; k < MAX_PLATES; k++) {
-    if (State.plateActive[k] && State.plateArea[k] < MIN_PLATE_AREA) deactivatePlate(k);
+    if (State.plateActive[k] && State.plateCellsCount[k] < MIN_PLATE_AREA) deactivatePlate(k);
   }
+  // 2. Try to split a few big ones.
   for (let k = 0; k < MAX_PLATES; k++) {
     if (!State.plateActive[k]) continue;
-    if (State.plateArea[k] < SPLIT_AREA_MIN) continue;
+    if (State.plateCellsCount[k] < SPLIT_AREA_MIN) continue;
     if (Math.random() > SPLIT_PROB) continue;
     let bestIdx = -1, bestM = SPLIT_MANTLE_MIN;
-    for (let kk = 0; kk < N * N; kk++) {
-      if (State.plateK1[kk] !== k) continue;
-      if (State.mantleField[kk] > bestM) { bestM = State.mantleField[kk]; bestIdx = kk; }
+    const start = State.plateCellsStart[k];
+    const count = State.plateCellsCount[k];
+    const idxs  = State.plateCellsIdx;
+    const mf    = State.mantleField;
+    for (let s = 0; s < count; s++) {
+      const kk = idxs[start + s];
+      if (mf[kk] > bestM) { bestM = mf[kk]; bestIdx = kk; }
     }
     if (bestIdx < 0) continue;
     let slot = -1;
@@ -148,6 +151,33 @@ export function computeWorleyFields() {
       TB[idx]  = State.plateType[K2[idx]];
       HiA[idx] = State.plateHills[k1];
       HiB[idx] = State.plateHills[K2[idx]];
+    }
+  }
+
+  // Rebuild per-plate cell lists (CSR): count, then prefix sum → starts,
+  // then fill plateCellsIdx. Cost is O(N²) but only runs every 60 ticks.
+  State.plateCellsCount.fill(0);
+  for (let k = 0; k < N * N; k++) {
+    const pk = K1[k];
+    if (pk >= 0) State.plateCellsCount[pk]++;
+  }
+  {
+    let acc = 0;
+    const start = State.plateCellsStart;
+    const count = State.plateCellsCount;
+    for (let k = 0; k < MAX_PLATES; k++) {
+      start[k] = acc;
+      acc += count[k];
+    }
+  }
+  {
+    // Scratch counter so the second pass doesn't clobber cells in flight.
+    const cursor = State.plateCellsCount;
+    cursor.fill(0);
+    for (let k = 0; k < N * N; k++) {
+      const pk = K1[k];
+      if (pk < 0) continue;
+      State.plateCellsIdx[State.plateCellsStart[pk] + cursor[pk]++] = k;
     }
   }
 
