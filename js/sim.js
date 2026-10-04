@@ -99,15 +99,21 @@ function stepClimate(dt, t /*, c */) {
 function stepVolcanoes(/* dt, t, c */) { tickVolcanoes(); }
 
 function stepRelax(dt, t /*, c */) {
-  const pulse = 0.7 + 0.3 * Math.sin(t * 0.11);
-  for (let k = 0; k < N * N; k++) {
-    const surface = surfaceField[k];
-    const target  = State.targetSurface[k];
-    const m = State.mantleField[k];
-    const dH4 = RELAX_K * (target - surface) * pulse * dt
-              + MANTLE_RATE * m * dt;
-    H4[k] += dH4;
-    surfaceField[k] += dH4;
+  // pulse carries a per-cell spatial phase taken from mantleField — that
+  // way the global 0.7..1.0 swing doesn't hit the whole world at once,
+  // and different mantle cells relax on slightly different cycles.
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      const surface = surfaceField[k];
+      const target  = State.targetSurface[k];
+      const m = State.mantleField[k];
+      const pulse = 0.7 + 0.3 * Math.sin(t * 0.11 + m * 5.0);
+      const dH4 = RELAX_K * (target - surface) * pulse * dt
+                + MANTLE_RATE * m * dt;
+      H4[k] += dH4;
+      surfaceField[k] += dH4;
+    }
   }
 }
 
