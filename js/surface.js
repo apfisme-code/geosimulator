@@ -114,6 +114,7 @@ export function clampSafety() {
     if (!isFinite(H2[k])) { H2[k] = 0; violated++; }
     if (!isFinite(H3[k])) { H3[k] = 0; violated++; }
     if (!isFinite(H4[k])) { H4[k] = 0; violated++; }
+    if (!isFinite(State.Fmag[k]))     State.Fmag[k] = 0;
     if (!isFinite(State.W[k])         || State.W[k] < 0)         { State.W[k] = 0; if (!isFinite(State.W[k])) violated++; }
     if (!isFinite(State.Sed[k])       || State.Sed[k] < 0)       { State.Sed[k] = 0; if (!isFinite(State.Sed[k])) violated++; }
     if (!isFinite(State.windSed[k])   || State.windSed[k] < 0)   { State.windSed[k] = 0; if (!isFinite(State.windSed[k])) violated++; }
