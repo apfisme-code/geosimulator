@@ -182,7 +182,9 @@ const terrainVS = `
 
     vec4 world = modelMatrix * vec4(pos, 1.0);
     vWorld   = world.xyz;
-    vNormalW = normalize(mat3(modelMatrix) * nrm);
+    // Tiles are pure translation (set per-frame in positionTiles), so
+    // the world-space normal is just the local normal — no mat3 needed.
+    vNormalW = nrm;
     vH   = surface;
     vW   = w;
     vWind = aux.y;
@@ -255,7 +257,8 @@ const waterVS = `
 
     vec4 world = modelMatrix * vec4(pos, 1.0);
     vWorld   = world.xyz;
-    vNormalW = normalize(mat3(modelMatrix) * nrm);
+    // Tiles are pure translation, so world-space normal = local normal.
+    vNormalW = nrm;
     vW   = w;
     vSed = aux.x;
     vTemp = t;
