@@ -33,7 +33,8 @@ export function initPlumes() {
     const h = surfaceField[k];
     if (h < Globals.seaLevel - 40) continue;
     let tooClose = false;
-    for (const p of Globals.plumes) {
+    for (let pi = 0; pi < Globals.plumes.length; pi++) {
+      const p = Globals.plumes[pi];
       let dxi = (p.i - i + N) % N; if (dxi > N / 2) dxi -= N;
       let dzj = (p.j - j + N) % N; if (dzj > N / 2) dzj -= N;
       if (dxi * dxi + dzj * dzj < 64) { tooClose = true; break; }
