@@ -235,62 +235,44 @@ function biomeAtPlayer() {
   } catch (e) { return '—'; }
 }
 
-// ---------- Periodic stats + history sampling ----------
-let lastHistoryUpdate = 0;
-let lastStatsUpdate = 0;
+// ---------- Periodic metrics + history sampling ----------
+// Single 1 Hz pass over the grid drives the history rings (for the
+// graphs panel) AND the 16-slot `Globals.stats` (for the HUD). Previously
+// these were two passes (2.5 Hz + 1 Hz); merging cuts the per-second
+// cell visits by ~3.5×. The 1 Hz cadence matches the history ring
+// resolution (300 entries × 1 s = 5 min); the HUD is fine reading
+// slightly less fresh stats.
+let lastMetricsUpdate = 0;
 
 /**
- * Drive the periodic sampling: once per simulated second, push a row
- * into the history rings; 2.5× per simulated second, recompute the
- * 16-slot `Globals.stats` summary that the HUD displays.
+ * Drive the periodic sampling: once per simulated second, call
+ * `sampleMetrics()` which does a single grid pass and updates both
+ * `Globals.stats` (HUD) and the per-metric history rings (graphs).
  *
  * @param {number} now  `performance.now()` value from the rAF callback.
  */
 export function periodicUI(now) {
-  if (now - lastHistoryUpdate >= 1000) {
-    sampleHistory();
-    lastHistoryUpdate = now;
-  }
-  if (now - lastStatsUpdate >= 400) {
-    sampleStats();
-    lastStatsUpdate = now;
+  if (now - lastMetricsUpdate >= 1000) {
+    sampleMetrics();
+    lastMetricsUpdate = now;
   }
 }
 
 /**
- * Take a one-second snapshot of land/snow/ice/sea/plate/aquifer metrics
- * into the corresponding ring buffers. Oldest entry is overwritten once
- * the buffer is full.
- */
-function sampleHistory() {
-  let landCount = 0, snowCount = 0, iceCount = 0, aqSum = 0;
-  for (let k = 0; k < N * N; k++) {
-    const s = State.surfaceField[k];
-    if (s > Globals.seaLevel) { landCount++; aqSum += State.Aq[k]; }
-    if (State.snowLayer[k] > 0.1) snowCount++;
-    if (State.iceLayer[k] > 0.1) iceCount++;
-  }
-  State.histLand[Globals.histHead]   = landCount / (N * N) * 100;
-  State.histSnow[Globals.histHead]   = snowCount / (N * N) * 100;
-  State.histIce[Globals.histHead]    = iceCount  / (N * N) * 100;
-  State.histSea[Globals.histHead]    = Globals.seaLevel;
-  State.histPlates[Globals.histHead] = countActivePlates();
-  State.histAq[Globals.histHead]     = landCount > 0 ? aqSum / landCount : 0;
-  Globals.histHead  = (Globals.histHead + 1) % HIST_LEN;
-  Globals.histCount = Math.min(Globals.histCount + 1, HIST_LEN);
-}
-
-/**
- * Recompute the 16-slot `Globals.stats` array the HUD reads from:
+ * One combined pass over the grid: produces the per-second history ring
+ * entries (`histLand` / `histSnow` / `histIce` / `histSea` / `histPlates`
+ * / `histAq`) and the 16-slot `Globals.stats` summary
  * `[minH, maxH, H1, H2, H3, H4, W, landPct, snowPct, accumAvg, accumMax,
- * tempAvg, humAvg, icePct, iceAvg, aqAvg]`. Also dumps the total lava
- * sum into `window.__lavaSum` for debugging.
+ * tempAvg, humAvg, icePct, iceAvg, aqAvg]`.
+ *
+ * Also dumps the total lava volume into `window.__lavaSum` for debugging.
+ * Runs every 1000 ms from `periodicUI`.
  */
-function sampleStats() {
+function sampleMetrics() {
   let mn = Infinity, mx = -Infinity;
   let s1 = 0, s2 = 0, s3 = 0, s4 = 0, sw = 0, fa = 0, faMax = 0;
   let tAvg = 0, hAvg = 0;
-  let land = 0, snowCells = 0, iceCells = 0, iceTotal = 0, aqSum = 0, aqMax = 0, lavaSum = 0;
+  let land = 0, snowCells = 0, iceCells = 0, iceTotal = 0, aqSum = 0, lavaSum = 0;
   for (let k = 0; k < N * N; k++) {
     const h = State.surfaceField[k];
     if (h < mn) mn = h; if (h > mx) mx = h;
@@ -301,12 +283,23 @@ function sampleStats() {
     tAvg += State.temperature[k];
     hAvg += State.humidity[k];
     if (h > Globals.seaLevel) { land++; aqSum += State.Aq[k]; }
-    if (State.Aq[k] > aqMax) aqMax = State.Aq[k];
     if (State.snowLayer[k] > 0.1) snowCells++;
     if (State.iceLayer[k] > 0.1)  { iceCells++; iceTotal += State.iceLayer[k]; }
     lavaSum += State.lavaBonus[k];
   }
   const K = N * N;
+
+  // History ring (graphs panel).
+  State.histLand[Globals.histHead]   = land / K * 100;
+  State.histSnow[Globals.histHead]   = snowCells / K * 100;
+  State.histIce[Globals.histHead]    = iceCells / K * 100;
+  State.histSea[Globals.histHead]    = Globals.seaLevel;
+  State.histPlates[Globals.histHead] = countActivePlates();
+  State.histAq[Globals.histHead]     = land > 0 ? aqSum / land : 0;
+  Globals.histHead  = (Globals.histHead + 1) % HIST_LEN;
+  Globals.histCount = Math.min(Globals.histCount + 1, HIST_LEN);
+
+  // HUD stats.
   Globals.stats = [
     mn, mx, s1 / K, s2 / K, s3 / K, s4 / K, sw / K,
     land / K * 100,
