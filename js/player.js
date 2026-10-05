@@ -10,11 +10,30 @@ import { resetTerrain } from './sim.js';
 import { terrainMat, waterMat, renderer } from './render.js';
 import { sampleHeight } from './surface.js';
 
+/** Re-export of `Globals.player` so other modules don't have to import
+ *  from `./state.js` directly. Pose: `{x, z, yaw, pitch, vy, onGround}`. */
 export const player = Globals.player;
 
+/** Currently-held keys indexed by `KeyboardEvent.code`. Updated by the
+ *  global `keydown` / `keyup` listeners below. @type {Object<string, boolean>} */
 export const keys = Object.create(null);
 
 // ---------- Global key bindings ----------
+/**
+ * Key bindings:
+ * - `P`         pause/resume simulation
+ * - `R`         reset world (same seed)
+ * - `G`         reset world (new seed)
+ * - `T`         toggle rain
+ * - `B`         toggle wind
+ * - `I`         toggle ice/snow
+ * - `V`         toggle volcanoes
+ * - `L`         cycle overlay mode (biomes, height, …, aquifers)
+ * - `X`         toggle the geological cross-section preview
+ * - `Y`         toggle the history graphs
+ *
+ * Mouse motion (when pointer-locked) drives yaw/pitch directly.
+ */
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Space') e.preventDefault();
@@ -63,6 +82,17 @@ document.addEventListener('mousemove', e => {
 });
 
 // ---------- One simulation frame's worth of motion ----------
+/**
+ * Apply one frame's worth of movement + gravity to the player.
+ * Reads the keyboard state (`keys`), updates `player.x`/`player.z`
+ * (wrapped on the torus) and `player.yaw`/`player.pitch`, then
+ * integrates `player.vy` against gravity and snaps feet to
+ * `sampleHeight` when on the ground.
+ *
+ * Called once per animation frame from `main.js`, before `simulate()`.
+ *
+ * @param {number} dt  Real-time step in seconds (already clamped at 0.1).
+ */
 export function tickPlayer(dt) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);

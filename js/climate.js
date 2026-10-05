@@ -12,12 +12,40 @@ const { SHADOW_STEPS, SHADOW_K,
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { fbmTorus } from './noise.js';
 
-// Wind direction at latitude j — pure function, exported for wind/ice modules too.
+/**
+ * Wind direction X-component at row `j` (latitude).
+ * Pure function — re-exported so the wind/ice modules share the same
+ * trigonometric definition as the rain-shadow scan.
+ * @param {number} j  Row index (0..N-1).
+ * @returns {number}  Wind X in arbitrary units (typically multiplied by 4).
+ */
 export function windDirX(j) { return -Math.cos(4 * Math.PI * j / N); }
+/**
+ * Wind direction Z-component at row `j` (latitude).
+ * @param {number} j  Row index (0..N-1).
+ * @returns {number}  Wind Z in arbitrary units (typically multiplied by 4).
+ */
 export function windDirZ(j) { return  0.25 * Math.sin(4 * Math.PI * j / N); }
 
-// BFS distance to the nearest water/ice edge; humidity falls off exponentially
-// with that distance, and is suppressed on the lee side of high terrain.
+/**
+ * Compute every per-cell climate field used downstream by rain, ice,
+ * biomes and sea level. Stages:
+ *
+ *   1. BFS distance from any cell that holds water or sea-ice into
+ *      `humDist`.
+ *   2. Rain shadow: for each cell scan `SHADOW_STEPS` cells upwind and
+ *      record the max positive height barrier; emit a [0,1] survival
+ *      factor into `rainShadow`.
+ *   3. Humidity = mix of distance falloff, river accumulation, FBM noise
+ *      and the rain-shadow factor, clamped to [0, 1].
+ *   4. Ocean current delta: ocean cells with land to the west get a
+ *      cold current; cells with land to the east get a warm one.
+ *   5. Temperature: latitude × (1 − lapse·altitude) + current + erupt
+ *      heat, with a slow seasonal latitude shift. Clamped to [0, 1].
+ *
+ * @param {number} t  Simulated time (seconds since world reset), used
+ *                    for the seasonal swing.
+ */
 export function computeClimate(t) {
   // 1. Distance to water (BFS from any cell that holds water or ice)
   State.humDist.fill(1e9);
@@ -124,7 +152,15 @@ export function computeClimate(t) {
   }
 }
 
-// Adapt sea level toward a target driven by the global temperature anomaly.
+/**
+ * Adapt `Globals.seaLevel` toward a target driven by the global
+ * temperature anomaly. The baseline `tRef` is an EMA of the average
+ * temperature; warmer-than-baseline averages shrink the sea level
+ * (thermal expansion of ocean volume isn't modelled, so this is the
+ * reverse sign — but it gives the world a smooth long-term drift).
+ *
+ * Called once per `CLIMATE_INTERVAL` ticks, right after `computeClimate`.
+ */
 export function updateSeaLevel() {
   let tSum = 0;
   for (let k = 0; k < N * N; k++) {

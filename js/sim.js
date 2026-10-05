@@ -37,6 +37,9 @@ import { glacierStep } from './ice.js';
 // =====================================================================
 
 // --- Tectonics (slow) ---
+/** Slow tectonics: drift plates, rebuild Worley ownership, advance mantle
+ *  field, deactivate tiny plates and possibly split a big one.
+ *  Runs every DRIFT_INTERVAL ticks. */
 function stepDrift(dt, t /*, c */) {
   driftPlates(DRIFT_INTERVAL * dt);
   computeWorleyFields();
@@ -47,6 +50,9 @@ function stepDrift(dt, t /*, c */) {
   if      (after > before) Globals.birthsTotal += (after - before);
   else if (after < before) Globals.deathsTotal += (before - after);
 }
+/** Advect all four height layers along accumulated plate drift, plus
+ *  lavaBonus (so cones stay anchored to their plate). Runs every
+ *  ADVECT_INTERVAL ticks. */
 function stepAdvect(dt /*, t, c */) {
   advectLayers(ADVECT_INTERVAL * dt);
   Globals.advectRuns++;
@@ -54,7 +60,8 @@ function stepAdvect(dt /*, t, c */) {
     throw new Error(`stepAdvect produced NaN at k=0 — H1=${H1[0]} H2=${H2[0]} H3=${H3[0]} H4=${H4[0]} c=${Globals.simStepCount}`);
   }
 }
-// Advection of layer heights along plate drift.
+/** Move the four soil/gravel/rock/lava fields one cell per plate-step
+ *  along the per-plate drift velocity. Surface in each cell is conserved. */
 function advectLayers(dtAdv) {
   const inv = dtAdv / L * N;
   for (let j = 0; j < N; j++) {
@@ -80,11 +87,17 @@ function advectLayers(dtAdv) {
   H1.set(State.H1t); H2.set(State.H2t); H3.set(State.H3t); H4.set(State.H4t);
   State.lavaBonus.set(State.lavaBonusT);
 }
+/** Fill depressions and build the D8 flow-direction + flow-accumulation
+ *  routing maps used by climate humidity and river erosion.
+ *  Runs every FLOW_ROUTING_INTERVAL ticks. */
 function stepRouting(/* dt, t, c */) {
   computeFlowRouting();
   computeSpillLevels();
   Globals.routingRuns++;
 }
+/** Compute humidity/temperature/rain-shadow/oceans/climate and adapt
+ *  sea level toward its temperature-driven target.
+ *  Runs every CLIMATE_INTERVAL ticks. */
 function stepClimate(dt, t /*, c */) {
   // Diagnostics: catch the moment a height field first goes NaN.
   if (!isFinite(surfaceField[0])) {
@@ -96,12 +109,12 @@ function stepClimate(dt, t /*, c */) {
 }
 
 // --- Surface processes (every tick) ---
+/** Run pending volcano eruptions (lava + ash + heat), decay old heat/ash. */
 function stepVolcanoes(/* dt, t, c */) { tickVolcanoes(); }
 
+/** Relax H4 toward targetSurface + add mantle uplift. Per-cell phase
+ *  shift from mantleField prevents the whole planet from pulsing in sync. */
 function stepRelax(dt, t /*, c */) {
-  // pulse carries a per-cell spatial phase taken from mantleField — that
-  // way the global 0.7..1.0 swing doesn't hit the whole world at once,
-  // and different mantle cells relax on slightly different cycles.
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const k = j * N + i;
@@ -117,21 +130,30 @@ function stepRelax(dt, t /*, c */) {
   }
 }
 
+/** Avalanche talus sliding — moves H1..H4 between neighbours until slope
+ *  drops below TALUS, surface is conserved. */
 function stepTalus(dt /*, t, c */) { applyTalus(dt); }
+
+/** Soil → gravel → soft rock → hard rock compaction over time, plus
+ *  reverse weathering on exposed stone. */
 function stepLithify(dt /*, t, c */) { lithify(dt); }
 
+/** Sea-ice growth/melt, snow accumulation/melt, snow→ice compaction,
+ *  meltwater routing to W + Aq. */
 function stepIce(dt, t /*, c */) {
   if (Globals.iceEnabled) glacierStep(dt, t);
 }
 
+/** Wind: advect suspended sediment, then erode or deposit against
+ *  transport capacity. Drops sediment back to soil when wind is disabled. */
 function stepWind(dt, t /*, c */) {
   if (Globals.windEnabled) { windAdvect(dt); windErodeDeposit(dt, t); }
   else dropWindSed();
 }
 
 // --- Hydrology cycle (every tick) ---
-// Rain + infiltration in a single field sweep — both touch W/Aq, and
-// infiltration must run after rain anyway, so fusing them is free.
+/** Rainfall (cloud-noise × humidity) plus soil infiltration and baseflow,
+ *  all in one pass. Infiltration must run after rain on the same cell. */
 function stepRainInfiltrate(dt, t /*, c */) {
   const rainOn = Globals.rainEnabled;
   for (let j = 0; j < N; j++) {
@@ -170,8 +192,11 @@ function stepRainInfiltrate(dt, t /*, c */) {
   }
 }
 
+/** Move surface water along the D8 flow directions, biased toward the
+ *  lower neighbour. Direction alternates each tick for symmetry. */
 function stepWater(dt, t, c) { advectWater(dt, (c & 1) === 1); }
 
+/** Subsurface water flow + clamp. Underwater cells lose their aquifer. */
 function stepAq(dt, t, c) {
   const aqDt = dt * AQ_FLOW_INTERVAL;
   advectAq(aqDt, (c & 1) === 1);
@@ -183,11 +208,13 @@ function stepAq(dt, t, c) {
   }
 }
 
+/** Transport-limited river erosion/deposition based on water flux and
+ *  slope, then refresh surfaceField so subsequent steps see the new
+ *  stack height. */
 function stepErosion(dt /*, t, c */) { riverErosion(dt); recomputeSurface(); }
 
-// Evaporation + lake fill/drain in one pass — lakes needs to see the
-// post-evaporation W for the fill-rate comparison, so run evap first
-// inside the loop.
+/** Evaporation (× geometric decay) and lake fill/drain/clamp ocean level
+ *  — fused because lakes need post-evaporation W for the fill-rate check. */
 function stepEvapLakes(dt /*, t, c */) {
   const ev = Math.max(0, 1 - EVAP * dt);
   for (let k = 0; k < N * N; k++) {
@@ -211,6 +238,7 @@ function stepEvapLakes(dt /*, t, c */) {
   }
 }
 
+/** Sanitise all height & flux arrays: NaN → 0, flux < 0 → 0. */
 function stepClamp(/* dt, t, c */)    { clampSafety(); }
 
 // =====================================================================
@@ -266,8 +294,15 @@ export function simulate(dt) {
   }
 }
 
-// Expose a couple of internal probes for the browser console.
+// Expose a couple of internal probes for the browser console. Useful when
+// debugging what the cell under the player actually holds: `__sim.surfaceAtPlayer`
+// returns the index, all four height layers, the cached surface sum, the
+// plate target and the local mantle field strength — everything the
+// pipeline should keep in sync.
 window.__sim = {
+  /** Height-stack snapshot for the cell currently under the player.
+   *  @returns {{idx:number, H1:number, H2:number, H3:number, H4:number,
+   *             surface:number, target:number, mantle:number}} */
   get surfaceAtPlayer() {
     const pi = Math.floor(Globals.player.x / cellSize) % N;
     const pj = Math.floor(Globals.player.z / cellSize) % N;
@@ -283,6 +318,11 @@ window.__sim = {
 };
 
 // ---------- World reset ----------
+/** Re-initialise the entire world state — fresh seed (optional), fresh
+ *  plates, fresh height stack, fresh routing, climate and plumes.
+ *  @param {boolean} regen  If true, picks a new worldSeed; otherwise
+ *                          reuses the current seed (same world, fresh state).
+ */
 export function resetTerrain(regen) {
   if (regen) Globals.worldSeed = (Math.random() * 0x7fffffff) | 0;
   Globals.seaLevel = 0;

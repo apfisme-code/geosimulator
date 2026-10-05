@@ -9,7 +9,13 @@ const { SPEED: WIND_SPEED, CAP_BASE: WIND_CAP_BASE, CAP_SLOPE: WIND_CAP_SLOPE,
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { windDirX, windDirZ } from './climate.js';
 
-// Semi-Lagrangian advection with CFL sub-stepping when wind is large.
+/**
+ * Semi-Lagrangian advection of `windSed` by the per-row wind direction.
+ * CFL sub-stepping when the per-tick displacement exceeds 0.9 cells so
+ * the scheme stays stable at the configured `SPEED`.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function windAdvect(dt) {
   State.windSedB.set(State.windSed);
   for (let j = 0; j < N; j++) {
@@ -34,7 +40,17 @@ export function windAdvect(dt) {
   }
 }
 
-// Pick up loose dry soil on windward slopes, drop it on leeward/flat ground.
+/**
+ * Pick up loose dry soil on windward slopes, drop it on leeward / flat
+ * ground. Capacity combines a baseline with extra slack proportional to
+ * the upwind gradient; erosion is faster on dry cells and slower on wet
+ * ones; deposition prefers humid cells (so windSed drops where rain is
+ * already falling).
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ * @param {number} t   Simulated time, used to modulate the global wind
+ *                     strength with a slow `0.7 + 0.3·sin(0.11·t)` factor.
+ */
 export function windErodeDeposit(dt, t) {
   const strength = 0.7 + 0.3 * Math.sin(t * 0.11);
   for (let j = 0; j < N; j++) {
@@ -74,8 +90,11 @@ export function windErodeDeposit(dt, t) {
   }
 }
 
-// Drain any in-flight suspended sediment back into the soil column
-// (used when the user toggles wind off).
+/**
+ * Drain any in-flight suspended sediment back into the soil column.
+ * Called when the user toggles wind off (B key) so we don't strand a
+ * suspended layer mid-air forever.
+ */
 export function dropWindSed() {
   for (let k = 0; k < N * N; k++) {
     if (State.windSed[k] > 0) {

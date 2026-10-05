@@ -3,13 +3,31 @@
 import { GRID } from './constants.js';
 const { L, N, cellSize, TAU } = GRID;
 
-// Perlin's quintic fade curve (used by the 4D noise sampler)
+/**
+ * Perlin's quintic fade curve. Maps `t` ∈ [0, 1] smoothly to itself with
+ * zero first- and second-order derivatives at both ends. Used by the
+ * 4D noise sampler to interpolate between lattice corners.
+ * @param {number} t  Input in [0, 1].
+ * @returns {number}  Smoothed value in [0, 1].
+ */
 export const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
 
-// Toroidal bilinear lookup: field is N*N flat array, sx/sz are in cell units.
-// We pre-clamp to one torus span [0, N) so callers passing arbitrarily
-// large velocity (or anything > 2^32 from cumulative drift) don't hit
-// floating-point precision loss in the % N step.
+/**
+ * Toroidal bilinear lookup. `field` is a flat `N*N` array; `sx`/`sz` are
+ * sample positions in cell units (can be any real number, including values
+ * outside [0, N) that result from cumulative drift).
+ *
+ * We pre-clamp to one torus span `[0, N)` using `x - floor(x/N)*N` rather
+ * than `x % N` so callers passing arbitrarily large velocities (or values
+ * > 2³² from long cumulative drift) don't hit floating-point precision
+ * loss in the modulo step.
+ *
+ * @template T
+ * @param {Float32Array|TypedArray} field  Flat N*N sample array.
+ * @param {number} sx  Sample position X in cell units.
+ * @param {number} sz  Sample position Z in cell units.
+ * @returns {number}   Bilinearly interpolated value at (sx, sz).
+ */
 export function bilinearWrap(field, sx, sz) {
   sx = sx - Math.floor(sx / N) * N;
   sz = sz - Math.floor(sz / N) * N;

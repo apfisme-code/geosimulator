@@ -7,7 +7,12 @@ const { AQ_MAX, ICE_FREEBORD_RATIO } = ICE;
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 import { fbmTorus } from './noise.js';
 
-// Soil: thinner underwater, modulated by FBM noise.
+/**
+ * Initial soil depth for one cell. Below `seaLevel − 8` we just return
+ * a thin constant; otherwise modulate by 3-octave FBM noise.
+ * @param {number} idx  Cell index.
+ * @returns {number}    Soil thickness in world units (≥ 0.05).
+ */
 export function initSoil(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 8) return 0.05;
@@ -17,6 +22,12 @@ export function initSoil(idx) {
   }
   return Math.max(0.05, 0.5 + 0.4 * n);
 }
+/**
+ * Initial gravel depth for one cell. Same shape as `initSoil` with a
+ * deeper baseline and a different seed offset.
+ * @param {number} idx  Cell index.
+ * @returns {number}    Gravel thickness in world units (≥ 0.1).
+ */
 export function initGravel(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 15) return 0.1;
@@ -26,6 +37,12 @@ export function initGravel(idx) {
   }
   return Math.max(0.1, 1.5 + 0.7 * n);
 }
+/**
+ * Initial soft-rock depth for one cell. Same shape as `initSoil` /
+ * `initGravel`, deeper still, with a third seed offset.
+ * @param {number} idx  Cell index.
+ * @returns {number}    Soft-rock thickness in world units (≥ 0.2).
+ */
 export function initSoftRock(idx) {
   const t = State.targetSurface[idx];
   if (t < Globals.seaLevel - 10) return 0.2;
@@ -36,8 +53,13 @@ export function initSoftRock(idx) {
   return Math.max(0.2, 3.5 + 1.5 * n);
 }
 
-// Lithify on the surface; weather back down when wet soil sits on stone.
-// Underwater lithification is much faster (sediment compaction).
+/**
+ * Soil → gravel → soft rock → hard rock compaction over time, plus
+ * reverse weathering when wet soil sits on top of stone. Underwater
+ * lithification is much faster (sediment compaction) than land.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function lithify(dt) {
   for (let k = 0; k < N * N; k++) {
     const surface = surfaceField[k];
@@ -79,7 +101,19 @@ export function lithify(dt) {
   }
 }
 
-// Sample the visible top of the column (used by player height query).
+/**
+ * Sample the visible top of the column under world coordinates `(x, z)`,
+ * with bilinear interpolation between the four surrounding cells. Adds
+ * the snow layer on top of land, and ice freeboard above sea level for
+ * ocean cells with sea ice.
+ *
+ * Used by the player controller to know what height to snap feet to.
+ *
+ * @param {number} x  World X coordinate (any real number; wrapped).
+ * @param {number} z  World Z coordinate (any real number; wrapped).
+ * @returns {number}  Visible top-of-column height. Falls back to
+ *                    `seaLevel` if the result is NaN/Infinity.
+ */
 export function sampleHeight(x, z) {
   x = ((x % L) + L) % L;
   z = ((z % L) + L) % L;
@@ -102,11 +136,16 @@ export function sampleHeight(x, z) {
   return isFinite(result) ? result : Globals.seaLevel;
 }
 
-// NaN safety net at the end of every simulation step.
-// Height layers (H1..H4) can be legitimately negative — that's where
-// ocean trenches live. We only reset NaN/Infinity to 0, never clamp to
-// a non-negative value. Flux arrays (W, Sed, Aq, …) are physically
-// ≥ 0 and get clamped to 0 on negative + non-finite.
+/**
+ * NaN safety net at the end of every simulation step.
+ *
+ * Height layers (H1..H4) can be legitimately negative — that's where
+ * ocean trenches live. We only reset NaN/Infinity to 0, never clamp to
+ * a non-negative value. Flux arrays (W, Sed, Aq, …) are physically
+ * ≥ 0 and get clamped to 0 on negative + non-finite.
+ *
+ * @returns {number} Number of clamp events that actually fired.
+ */
 export function clampSafety() {
   let violated = 0;
   for (let k = 0; k < N * N; k++) {

@@ -15,6 +15,14 @@ import { renderSlice, renderGraphs, updateHUD, periodicUI } from './ui.js';
 
 // ---------- Fatal-error overlay so failures don't show up as a blank screen ----------
 const errBox = (typeof document !== 'undefined') ? document.getElementById('err') : null;
+/**
+ * Push a fatal error into the `#err` overlay so the failure is visible
+ * instead of looking like a hang / blank canvas. Used for `window.error`,
+ * `unhandledrejection`, and the wrapped simulation catch in `tick`.
+ *
+ * @param {string} label  Short label (e.g. `'simulate'`).
+ * @param {Error|string} err  The thrown value.
+ */
 function showError(label, err) {
   console.error(label, err);
   if (!errBox) return;
@@ -42,6 +50,14 @@ let last = performance.now();
 let simAccum = 0;
 let graphTimer = 0;
 
+/**
+ * Per-frame callback. Walks the simulation, updates the camera, draws
+ * everything, and refreshes the UI. Catches any simulation error so a
+ * pipeline bug pauses the sim and surfaces a message instead of
+ * freezing the page.
+ *
+ * @param {number} now  `performance.now()` value passed by rAF.
+ */
 function tick(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;

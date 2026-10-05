@@ -21,10 +21,20 @@ import { State, Globals } from './state.js';
 import { vnoise4, fbmTorus } from './noise.js';
 
 // ---------- Initialisation ----------
+/**
+ * Spawn `PLATE_COUNT` random plates at fresh positions, types and drift
+ * velocities. Called once from `resetTerrain`. The remaining slots up to
+ * `MAX_PLATES` stay `active = 0` until a split needs them.
+ */
 export function initPlates() {
   for (let k = 0; k < PLATE_COUNT; k++) spawnRandomPlate(k);
 }
 
+/**
+ * Populate one plate slot in-place with a fresh random centre, type,
+ * base height, hilliness bias, drift velocity, and active flag.
+ * @param {number} slot  Plate index to write into.
+ */
 function spawnRandomPlate(slot) {
   State.plateCX[slot] = Math.random() * L;
   State.plateCZ[slot] = Math.random() * L;
@@ -46,17 +56,33 @@ function spawnRandomPlate(slot) {
   State.plateActive[slot]  = 1;
 }
 
+/**
+ * Mark a plate slot as inactive. Its array entries are left in place so
+ * the next spawn/split can pick them up; only `plateActive[k]` is cleared.
+ * @param {number} k  Plate slot index.
+ */
 function deactivatePlate(k) {
   State.plateActive[k] = 0;
 }
 
+/**
+ * Count the plates currently marked active. Used by the HUD and by
+ * `stepDrift` to track births/deaths.
+ * @returns {number} Number of plates with `plateActive[k] === 1`.
+ */
 export function countActivePlates() {
   let c = 0;
   for (let k = 0; k < MAX_PLATES; k++) if (State.plateActive[k]) c++;
   return c;
 }
 
-// Drift all plates by their velocity for `dts` simulated seconds.
+/**
+ * Drift every active plate by its velocity for `dts` simulated seconds,
+ * wrapping the centre position on the torus so plates that drift off the
+ * east edge reappear from the west.
+ * @param {number} dts  Elapsed simulated seconds for this step (typically
+ *                      `DRIFT_INTERVAL * dt`).
+ */
 export function driftPlates(dts) {
   for (let k = 0; k < MAX_PLATES; k++) {
     if (!State.plateActive[k]) continue;
@@ -65,9 +91,18 @@ export function driftPlates(dts) {
   }
 }
 
-// Per-step: deactivate tiny plates, occasionally split big ones.
-// plateCellsIdx (built by computeWorleyFields) gives O(area) scans
-// instead of O(N²) when looking for a plate's best mantle cell.
+/**
+ * Per-tick plate lifecycle:
+ *   1. Deactivate any active plate whose cell count dropped below
+ *      `MIN_PLATE_AREA` (eaten by neighbours).
+ *   2. With probability `SPLIT_PROB` per big active plate, find the cell
+ *      with the highest mantleField inside its CSR cell list and spawn a
+ *      child plate offset from it. The Worley fields are then rebuilt
+ *      so the new plate immediately takes its share of cells.
+ *
+ * Uses `plateCellsStart`/`plateCellsCount`/`plateCellsIdx` for O(area)
+ * scans of each plate's cells instead of O(N²).
+ */
 export function updatePlateLifecycle() {
   // 1. Deactivate tiny plates using plateCellsCount[k] as the area.
   for (let k = 0; k < MAX_PLATES; k++) {
@@ -111,9 +146,21 @@ export function updatePlateLifecycle() {
 }
 
 // ---------- Worley noise ----------
-// For each cell, find the two closest plate centres and store their IDs,
-// distances, and per-plate fields. Then assemble `targetSurface` from
-// plate heights, boundary effects, and detail noise.
+/**
+ * Rebuild all plate-derived fields for every cell:
+ *   - `plateK1`/`plateK2` (nearest / 2nd-nearest plate index)
+ *   - `plateF1`/`plateF2` (nearest / 2nd-nearest distance)
+ *   - `plateH_A`/`plateH_B`, `plateTypeA`/`plateTypeB`, `plateHillsA`/`plateHillsB`
+ *     (cached per-plate fields for the two owners, used by the target surface assembly)
+ *   - per-plate CSR cell lists (`plateCellsStart`/`Count`/`Idx`)
+ *   - `targetSurface` assembled from plate heights, boundary effects,
+ *     continental divergent plateaus, detail noise, and the existing
+ *     `lavaBonus`.
+ *
+ * This is O(N² × MAX_PLATES) for the ownership pass and O(N²) for the
+ * cell lists and target assembly — runs every `DRIFT_INTERVAL` ticks,
+ * after `driftPlates` has moved the centres.
+ */
 export function computeWorleyFields() {
   const K1 = State.plateK1, K2 = State.plateK2;
   const F1 = State.plateF1, F2 = State.plateF2;
@@ -250,7 +297,14 @@ export function computeWorleyFields() {
   for (let k = 0; k < N * N; k++) TGT2[k] += LBO[k];
 }
 
-// Slowly drifting low-frequency noise driving volcanism / uplift.
+/**
+ * Slowly drifting low-frequency noise driving volcanism and per-cell
+ * uplift. The same input sample (`*1.4`) is offset by `(ox, oy)` that
+ * orbit a small circle, so the noise field evolves smoothly in time
+ * without ever repeating exactly.
+ *
+ * @param {number} t  Simulated time (seconds since world reset).
+ */
 export function computeMantleField(t) {
   const ox = Math.cos(t * MANTLE_DRIFT) * 4.0;
   const oy = Math.sin(t * MANTLE_DRIFT) * 4.0;

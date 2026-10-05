@@ -9,44 +9,81 @@ const { ASH_LAYER_MAX } = VOLCANO;
 import { State, Globals } from './state.js';
 
 // ---------- Texture buffers ----------
+// All textures are N×N Float32 with RepeatWrapping so the GPU can sample
+// seamlessly across tile borders. The back-end `Float32Array` is exposed
+// only to `syncTextures()`; consumers read via the `texX` `DataTexture`s.
+/** RGBA: H1..H4 stacked into one texture for a single `texture()` call. */
 const texHBuf   = new Float32Array(N * N * 4);
+/** RG: W (water depth) + temperature. */
 const texWBuf   = new Float32Array(N * N * 2);
+/** RGBA: sediment, windSed, log(accumulation), humidity. */
 const texAuxBuf = new Float32Array(N * N * 4);
+/** RGBA: eruptHeat, ash normalised, iceLayer, snowLayer. */
 const texVolBuf = new Float32Array(N * N * 4);
+/** R: mantleField. */
 const texManBuf = new Float32Array(N * N);
+/** R: aquifer. */
 const texAqBuf  = new Float32Array(N * N);
 
+/**
+ * RGBA texture: `(H1, H2, H3, H4)` per cell.
+ * @type {THREE.DataTexture}
+ */
 export const texH = new THREE.DataTexture(texHBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
 texH.minFilter = THREE.LinearFilter; texH.magFilter = THREE.LinearFilter;
 texH.wrapS = THREE.RepeatWrapping;   texH.wrapT = THREE.RepeatWrapping;
 texH.needsUpdate = true;
 
+/**
+ * RG texture: `(W, temperature)` per cell.
+ * @type {THREE.DataTexture}
+ */
 export const texW = new THREE.DataTexture(texWBuf, N, N, THREE.RGFormat, THREE.FloatType);
 texW.minFilter = THREE.LinearFilter; texW.magFilter = THREE.LinearFilter;
 texW.wrapS = THREE.RepeatWrapping;   texW.wrapT = THREE.RepeatWrapping;
 texW.needsUpdate = true;
 
+/**
+ * RGBA texture: `(Sed, windSed, logUpstream, humidity)` per cell.
+ * @type {THREE.DataTexture}
+ */
 export const texAux = new THREE.DataTexture(texAuxBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
 texAux.minFilter = THREE.LinearFilter; texAux.magFilter = THREE.LinearFilter;
 texAux.wrapS = THREE.RepeatWrapping;   texAux.wrapT = THREE.RepeatWrapping;
 texAux.needsUpdate = true;
 
+/**
+ * RGBA texture: `(eruptHeat, ash normalised, iceLayer, snowLayer)` per cell.
+ * @type {THREE.DataTexture}
+ */
 export const texVol = new THREE.DataTexture(texVolBuf, N, N, THREE.RGBAFormat, THREE.FloatType);
 texVol.minFilter = THREE.LinearFilter; texVol.magFilter = THREE.LinearFilter;
 texVol.wrapS = THREE.RepeatWrapping;   texVol.wrapT = THREE.RepeatWrapping;
 texVol.needsUpdate = true;
 
+/**
+ * R texture: `mantleField` per cell (used by the tectonics overlay).
+ * @type {THREE.DataTexture}
+ */
 export const texMantle = new THREE.DataTexture(texManBuf, N, N, THREE.RedFormat, THREE.FloatType);
 texMantle.minFilter = THREE.LinearFilter; texMantle.magFilter = THREE.LinearFilter;
 texMantle.wrapS = THREE.RepeatWrapping;   texMantle.wrapT = THREE.RepeatWrapping;
 texMantle.needsUpdate = true;
 
+/**
+ * R texture: aquifer level per cell.
+ * @type {THREE.DataTexture}
+ */
 export const texAq = new THREE.DataTexture(texAqBuf, N, N, THREE.RedFormat, THREE.FloatType);
 texAq.minFilter = THREE.LinearFilter; texAq.magFilter = THREE.LinearFilter;
 texAq.wrapS = THREE.RepeatWrapping;   texAq.wrapT = THREE.RepeatWrapping;
 texAq.needsUpdate = true;
 
-// Push current State into the GPU textures.
+/**
+ * Push the latest `State` snapshot into every GPU texture. Called once
+ * per frame from `main.js` after `simulate()` runs. Logs an `ashLayer`
+ * entry normalised by `ASH_LAYER_MAX` so the overlay slider can reach 1.
+ */
 export function syncTextures() {
   for (let k = 0; k < N * N; k++) {
     const k4 = k * 4, k2 = k * 2;
@@ -76,6 +113,15 @@ export function syncTextures() {
 }
 
 // ---------- Terrain mesh ----------
+/**
+ * Build the per-tile grid geometry: a flat (NV+1)² grid covering one
+ * tile of side `L`, with UVs normalised to `[0, 1]` for seamless texture
+ * sampling across tile boundaries. Two triangles per cell.
+ *
+ * @returns {THREE.BufferGeometry}  Geometry suitable for both the terrain
+ *                                  and water meshes (they share UVs and
+ *                                  topology; only the vertex shader differs).
+ */
 function buildGridGeometry() {
   const geo = new THREE.BufferGeometry();
   const V = NV1 * NV1;
@@ -490,16 +536,23 @@ const waterFS = `
 `;
 
 // ---------- Renderer / scene / camera ----------
+/** WebGL2 renderer used to present the scene. Appended to `<body>` and
+ *  sized to the viewport; resize handler is registered at the bottom of
+ *  this module. @type {THREE.WebGLRenderer} */
 export const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const skyColor = new THREE.Color(0x8fadc9);
+/** Three.js scene containing lights + the 3×3 tile group.
+ *  @type {THREE.Scene} */
 export const scene = new THREE.Scene();
 scene.background = skyColor;
 scene.fog = new THREE.Fog(skyColor, L * 0.15, L * 0.55);
 
+/** Perspective camera positioned at the player every frame.
+ *  @type {THREE.PerspectiveCamera} */
 export const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, L * 2);
 scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x3a2a18, 0.9));
 const sunDir = new THREE.Vector3(0.6, 1.0, 0.3).normalize();
@@ -508,6 +561,18 @@ sun.position.copy(sunDir).multiplyScalar(200);
 scene.add(sun);
 
 // ---------- Materials ----------
+/**
+ * Shader material for the land surface. GLSL3 / WebGL2.
+ *
+ * Uniforms:
+ * - `texH`/`texW`/`texAux`/`texVol`/`texMantle`/`texAq` — the data textures.
+ * - `uTexel`/`uCellSize` — texel size in UV space and world-space cell size.
+ * - `uWaterMix`/`uSeaLevel` — currently unused by terrain but kept for symmetry.
+ * - `uOverlayMode` — int 0..8 selecting the colour map.
+ * - `uLightDir`/`uAmbient`/`uSunColor` — diffuse lighting inputs.
+ *
+ * @type {THREE.ShaderMaterial}
+ */
 export const terrainMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms: {
@@ -530,6 +595,15 @@ export const terrainMat = new THREE.ShaderMaterial({
   fragmentShader: terrainFS,
 });
 
+/**
+ * Shader material for the water surface. GLSL3 / WebGL2.
+ * Same data inputs as `terrainMat` but a different vertex/fragment shader:
+ * the water mesh is at sea level with optional ice freeboard on top, and
+ * is rendered with `transparent: true`, `depthWrite: false` and
+ * `DoubleSide` so the back of waves doesn't disappear underwater.
+ *
+ * @type {THREE.ShaderMaterial}
+ */
 export const waterMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms: {
@@ -558,7 +632,11 @@ export const waterMat = new THREE.ShaderMaterial({
 
 // ---------- Toroidal tile group (3×3 around the player) ----------
 const terrainGeo = buildGridGeometry();
+/** 3×3 grid of land tiles around the player. Each entry is
+ *  `{mesh, i, j}` with `i, j ∈ {-1, 0, 1}`. @type {Array<{mesh:THREE.Mesh, i:number, j:number}>} */
 export const terrainTiles = [];
+/** 3×3 grid of water tiles around the player. Same shape as `terrainTiles`.
+ *  @type {Array<{mesh:THREE.Mesh, i:number, j:number}>} */
 export const waterTiles = [];
 for (let i = -1; i <= 1; i++) {
   for (let j = -1; j <= 1; j++) {
@@ -573,7 +651,19 @@ for (let i = -1; i <= 1; i++) {
   }
 }
 
-// Position the tiles around the player on every frame.
+/**
+ * Place the 3×3 tile group around the player so the world appears
+ * infinite. Each tile's mesh position is `i·L − playerX` (and `j·L −
+ * playerZ`), so when the player moves east by one world unit, every tile
+ * slides west by one unit. We also push the current camera position and
+ * sea level into the water/terrain material uniforms.
+ *
+ * Called from `main.js` on every animation frame, after the camera has
+ * been moved.
+ *
+ * @param {number} playerX  Player world X.
+ * @param {number} playerZ  Player world Z.
+ */
 export function positionTiles(playerX, playerZ) {
   for (const t of terrainTiles) {
     t.mesh.position.set(t.i * L - playerX, 0, t.j * L - playerZ);

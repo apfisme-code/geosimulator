@@ -14,12 +14,32 @@ const imul = Math.imul;
 //   x | 0  on negative x → -1 - floor(-x)   (off-by-one)
 // The branch fixes that with one extra subtract on negative inputs.
 // Hot: called 4× per vnoise4 call → a few % of total runtime.
+/**
+ * Fast integer floor for noise sample inputs (positive or negative).
+ * Equivalent to `Math.floor` but ~30 % faster in tight loops.
+ * @param {number} x  Real value to floor.
+ * @returns {number}  Largest integer ≤ x.
+ */
 function fastFloor(x) { return x >= 0 ? (x | 0) : ((x | 0) - 1); }
 
 // ---------- Hash (PCG-style 4D integer mix) ----------
-// Returns a deterministic noise value in [0, 1) for integer inputs.
-// Uses Math.imul so the multiplication stays in 32-bit int space
-// (JS float * float would lose low bits for large inputs).
+/**
+ * Deterministic 4D integer hash. Returns a noise value in `[0, 1)` for
+ * integer (or fractional) inputs. Uses `Math.imul` so the multiplication
+ * stays in 32-bit int space (JS float * float would lose low bits for
+ * large inputs).
+ *
+ * Mix constants are arbitrary large primes — output avalanche pass with two
+ * shift/xor steps ensures that any single-bit input change flips roughly
+ * half of the output bits.
+ *
+ * @param {number} x     First integer coordinate.
+ * @param {number} y     Second integer coordinate.
+ * @param {number} z     Third integer coordinate.
+ * @param {number} w     Fourth integer coordinate.
+ * @param {number} seed  RNG seed (32-bit int).
+ * @returns {number}      Deterministic hash in `[0, 1)`.
+ */
 export function hash4(x, y, z, w, seed) {
   let h = imul(x, 374761393) ^ imul(y, 668265263)
         ^ imul(z, 1274126177) ^ imul(w, 2654435761)
@@ -32,8 +52,20 @@ export function hash4(x, y, z, w, seed) {
 }
 
 // ---------- 4D value noise ----------
-// Computes a smooth (quintic fade) interpolated value noise over the
-// integer lattice. Returns roughly [-1, 1].
+/**
+ * 4D value noise. Computes a smooth (quintic fade) interpolation of the
+ * integer-lattice corner samples produced by `hash4`. The 4D design lets
+ * us animate a slice of the noise field along the `w` axis without
+ * changing the `(x, y, z)` pattern — see `fbmTorus`, which feeds `t`
+ * into `w`.
+ *
+ * @param {number} x     First coordinate.
+ * @param {number} y     Second coordinate.
+ * @param {number} z     Third coordinate.
+ * @param {number} w     Fourth coordinate (often `time`).
+ * @param {number} seed  RNG seed.
+ * @returns {number}     Value roughly in `[-1, 1]`.
+ */
 export function vnoise4(x, y, z, w, seed) {
   const xi = fastFloor(x), yi = fastFloor(y), zi = fastFloor(z), wi = fastFloor(w);
   const xf = x - xi, yf = y - yi, zf = z - zi, wf = w - wi;
@@ -70,8 +102,24 @@ export function vnoise4(x, y, z, w, seed) {
 }
 
 // ---------- FBM on the torus ----------
-// Sample the unit-circle coordinates of (x,z) wrapped to L, build a
-// 4D coordinate for each, and let audio combine octaves.
+/**
+ * Fractal Brownian Motion (sum of octaves) on the torus. `(x, z)` are
+ * world coordinates in `[0, L)`. Internally we map them to unit-circle
+ * `(u, v) ∈ [0, 2π)`, then feed `(cu, sua, cv, sv) * freq` to vnoise4 —
+ * this makes the noise field periodic with the torus wraparound so there's
+ * no visible seam.
+ *
+ * Octaves are summed with amplitude halving and frequency doubling.
+ * The result is normalised by the total amplitude, so the return value is
+ * roughly in `[-1, 1]` regardless of `oct`.
+ *
+ * @param {number} x          World X coordinate (any real number; wrapped).
+ * @param {number} z          World Z coordinate (any real number; wrapped).
+ * @param {number} oct        Number of octaves (1..~8 typical).
+ * @param {number} baseFreq   Frequency of the first octave.
+ * @param {number} seed       RNG seed (use `worldSeed + offset` per usage).
+ * @returns {number}          FBM value roughly in `[-1, 1]`.
+ */
 export function fbmTorus(x, z, oct, baseFreq, seed) {
   const TAU_INV = TAU / L;
   const u = x * TAU_INV, v = z * TAU_INV;

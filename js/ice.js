@@ -10,8 +10,25 @@ const { ICE_FORM_RATE, ICE_MELT_RATE, ICE_MAX_LAYER,
         MELT_TO_W, MELT_TO_AQ, AQ_MAX } = ICE;
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
-// One combined step covering sea-ice growth/melt, snow accumulation/melt,
-// snow→ice compaction and meltwater routing.
+/**
+ * One combined step covering sea-ice growth/melt, snow accumulation/melt,
+ * snow→ice compaction and meltwater routing to W + Aq. For every cell:
+ *
+ *   1. Sea ice forms below `ICE_TEMP` and melts above `ICE_TEMP + 0.02`;
+ *      land cells lose ice at twice the melt rate so it doesn't linger.
+ *   2. Snow accumulates below `SNOW_TEMP` on a solid top (land or sea
+ *      ice), with a slope penalty so steep ground stays bare. The melt
+ *      band `SNOW_TEMP..SNOW_TEMP + MELT_BAND_T` produces a partial melt;
+ *      above the band, full melt. Melt water on land is split `MELT_TO_W`
+ *      to surface water and `MELT_TO_AQ` to aquifer (capped at `AQ_MAX`).
+ *   3. Once enough snow weight sits on sea ice (`snowLayer > 0.3` and
+ *      `iceLayer > 0.05`), a small `SNOW_COMPACT_RATE` chunk compacts
+ *      into ice.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ * @param {number} t   Simulated time (currently unused by `glacierStep`
+ *                     itself but kept for symmetry with other steps).
+ */
 export function glacierStep(dt, t) {
   for (let j = 0; j < N; j++) {
     const jN = (j + 1) % N, jS = (j - 1 + N) % N;

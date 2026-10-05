@@ -11,7 +11,16 @@ const { PLUME_COUNT, ERUPT_MIN: PLUME_ERUPT_MIN, ERUPT_MAX: PLUME_ERUPT_MAX,
         ASH_SIG, ASH_VOLUME, ASH_LAYER_MAX } = VOLCANO;
 import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 
-// Initial plume placement: anywhere above sea level with a minimum spacing.
+/**
+ * Place `PLUME_COUNT` volcano plumes on the world. Each candidate cell
+ * must be above `seaLevel − 40` (so deep ocean never spawns a volcano)
+ * and far enough (≥ 8 cells) from every existing plume. Up to 500
+ * attempts; if we still have fewer than `PLUME_COUNT` we just settle
+ * for what we got.
+ *
+ * Each placed plume gets a random first eruption time 20..80 seconds in
+ * the future.
+ */
 export function initPlumes() {
   Globals.plumes = [];
   let placed = 0;
@@ -35,7 +44,11 @@ export function initPlumes() {
   }
 }
 
-// Run any plumes whose timer has expired.
+/**
+ * Run any plumes whose eruption timer has expired, then decay the
+ * `eruptHeat` and `ashLayer` fields multiplicatively. No-op entirely if
+ * the user toggled `volcanoesEnabled` off (the H key).
+ */
 export function tickVolcanoes() {
   if (!Globals.volcanoesEnabled) return;
   for (let i = 0; i < Globals.plumes.length; i++) {
@@ -54,6 +67,14 @@ export function tickVolcanoes() {
   }
 }
 
+/**
+ * Trigger one eruption at the given plume: deposit a Gaussian-shaped
+ * lava falloff into `H4` and `lavaBonus` (so the cone survives the
+ * `stepRelax` smoothing), a heat burst near the vent, ash deposition
+ * further out, and melt nearby snow/ice. Reschedule the next eruption.
+ *
+ * @param {{i:number, j:number, k:number, nextErupt:number}} v  Plume descriptor.
+ */
 function eruptPlume(v) {
   const { i, j, k } = v;
   const isUnderwater = surfaceField[k] < Globals.seaLevel;

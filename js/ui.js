@@ -19,6 +19,12 @@ const graphCtx = graphCanvas.getContext('2d');
 const hud = document.getElementById('hud');
 
 // ---------- Slice preview (geological cross-section) ----------
+/**
+ * Draw the geological cross-section along the player's row into
+ * `#sliceCanvas`. Shows the four soil layers as a stacked column per
+ * cell, plus sea-ice and surface water on top, and a coloured legend.
+ * No-op if `Globals.showSlice` is false (the toggle is bound to `X`).
+ */
 export function renderSlice() {
   const Wc = sliceCanvas.width, Hc = sliceCanvas.height;
   sliceCtx.fillStyle = 'rgba(0,0,0,0.75)';
@@ -101,6 +107,11 @@ export function renderSlice() {
 }
 
 // ---------- History graphs ----------
+/**
+ * Draw the 5-minute history lines (land/snow/ice %, sea level, plate
+ * count, aquifer) into `#graphCanvas`. No-op if `Globals.showGraphs`
+ * is false (the toggle is bound to `Y`).
+ */
 export function renderGraphs() {
   const Wc = graphCanvas.width, Hc = graphCanvas.height;
   graphCtx.fillStyle = 'rgba(0,0,0,0.75)';
@@ -160,6 +171,12 @@ export function renderGraphs() {
 }
 
 // ---------- HUD ----------
+/**
+ * Rewrite the `#hud` element with a snapshot of player pose, time,
+ * world stats, plate count, plumes, eruption timing, and toggle states.
+ * Called every frame from `main.js` (errors are caught by the caller so
+ * a HUD bug doesn't blank the screen).
+ */
 export function updateHUD() {
   const activePlates = countActivePlates();
   const lastEruptAgo = Globals.lastEruption.t > 0 ? (Globals.simTime - Globals.lastEruption.t).toFixed(0) : '—';
@@ -180,6 +197,14 @@ export function updateHUD() {
     `зажимов<0: ${Globals.simClampViolations}`;
 }
 
+/**
+ * Classify the cell under the player into a Russian-language biome label
+ * based on temperature, lava / ash / snow / ice layers, and humidity.
+ * Returns `'—'` if anything throws (e.g. during the very first frame
+ * before State is fully populated).
+ *
+ * @returns {string}  Biome label, e.g. `'Тайга'`, `'Океан'`, `'Тундра'`.
+ */
 function biomeAtPlayer() {
   try {
     const pi = Math.floor(wrap(player.x) / cellSize) % N;
@@ -214,6 +239,13 @@ function biomeAtPlayer() {
 let lastHistoryUpdate = 0;
 let lastStatsUpdate = 0;
 
+/**
+ * Drive the periodic sampling: once per simulated second, push a row
+ * into the history rings; 2.5× per simulated second, recompute the
+ * 16-slot `Globals.stats` summary that the HUD displays.
+ *
+ * @param {number} now  `performance.now()` value from the rAF callback.
+ */
 export function periodicUI(now) {
   if (now - lastHistoryUpdate >= 1000) {
     sampleHistory();
@@ -225,6 +257,11 @@ export function periodicUI(now) {
   }
 }
 
+/**
+ * Take a one-second snapshot of land/snow/ice/sea/plate/aquifer metrics
+ * into the corresponding ring buffers. Oldest entry is overwritten once
+ * the buffer is full.
+ */
 function sampleHistory() {
   let landCount = 0, snowCount = 0, iceCount = 0, aqSum = 0;
   for (let k = 0; k < N * N; k++) {
@@ -243,6 +280,12 @@ function sampleHistory() {
   Globals.histCount = Math.min(Globals.histCount + 1, HIST_LEN);
 }
 
+/**
+ * Recompute the 16-slot `Globals.stats` array the HUD reads from:
+ * `[minH, maxH, H1, H2, H3, H4, W, landPct, snowPct, accumAvg, accumMax,
+ * tempAvg, humAvg, icePct, iceAvg, aqAvg]`. Also dumps the total lava
+ * sum into `window.__lavaSum` for debugging.
+ */
 function sampleStats() {
   let mn = Infinity, mx = -Infinity;
   let s1 = 0, s2 = 0, s3 = 0, s4 = 0, sw = 0, fa = 0, faMax = 0;

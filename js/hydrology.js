@@ -11,6 +11,12 @@ import { State, Globals, H1, H2, H3, H4, surfaceField } from './state.js';
 // ---------- Priority-flood spill levels ----------
 // For every cell, the minimum water height that would make water spill
 // from this cell to the ocean. Implemented with a binary min-heap.
+/**
+ * Push a (cell, spill-level) entry onto the priority-flood min-heap.
+ * Sift-up maintains the heap invariant.
+ * @param {number} idx  Cell index.
+ * @param {number} lev  Spill level for that cell.
+ */
 function pfPush(idx, lev) {
   if (Globals.pfHeapSize >= State.pfHeapIdx.length) return;
   State.pfHeapIdx[Globals.pfHeapSize] = idx;
@@ -24,6 +30,11 @@ function pfPush(idx, lev) {
     i = p;
   }
 }
+/**
+ * Pop the cell with the smallest spill-level from the heap and return it.
+ * Sift-down restores the invariant.
+ * @returns {number} The cell index with the lowest spill-level.
+ */
 function pfPop() {
   const outIdx = State.pfHeapIdx[0];
   Globals.pfHeapSize--;
@@ -45,6 +56,18 @@ function pfPop() {
   return outIdx;
 }
 
+/**
+ * Fill `spillLevel[]`: for every cell, the minimum water height that
+ * would make water spill out of this cell and reach the ocean.
+ *
+ * Implemented as a priority-flood seeded from all ocean cells; expands
+ * outward by always picking the lowest-so-far unseen neighbour and
+ * setting its spill level to `max(parent spill, surface height)`. The
+ * lake fill/drain step uses these levels to decide where water can sit.
+ *
+ * If there are no ocean cells at all (sea level higher than everything),
+ * every cell is treated as already spilling at sea level.
+ */
 export function computeSpillLevels() {
   State.spillLevel.fill(1e9);
   Globals.pfHeapSize = 0;
@@ -81,8 +104,18 @@ export function computeSpillLevels() {
 }
 
 // ---------- D8 flow routing ----------
-// Iteratively fill 1-cell depressions, then pick for each cell the lowest
-// neighbour as its D8 sink, and accumulate flow via bucket-sorted descent.
+/**
+ * Build the D8 flow-direction map and the upstream accumulation map used
+ * by climate humidity and river erosion. Stages:
+ *
+ *   1. Iterative 1-cell depression fill into `bucketData` (4 passes max).
+ *   2. For every land cell, store the lowest neighbour's DIRS index in
+ *      `flowDir` (or `-1` for ocean / spill cells).
+ *   3. Bucket cells by filled height into `NBUCKETS` buckets so we can
+ *      accumulate flow in top-down order without sorting N² entries.
+ *   4. Walk high-to-low; every cell pushes 1 unit of flow (plus any
+ *      already accumulated) to its D8 sink. Ocean cells get reset to 0.
+ */
 export function computeFlowRouting() {
   // 1. Fill depressions (bucket data is the working copy)
   for (let k = 0; k < N * N; k++) {
@@ -176,7 +209,21 @@ export function computeFlowRouting() {
 }
 
 // ---------- Water pair flux ----------
-// Move water between adjacent cells, biased along the D8 flow direction.
+/**
+ * Move water between two adjacent cells, biased along the D8 flow
+ * direction. The caller passes the neighbour index and the DIRS offset
+ * of the connection so this function can decide whether to use the full
+ * weight (flow-aligned) or the much smaller cross-flow weight.
+ *
+ * Mutates `State.Wtmp`, `State.Sedtmp`, `State.Fmag`. Returns nothing —
+ * caller is expected to copy `Wtmp` back into `W` after the full pass.
+ *
+ * @param {number} a          Cell A index.
+ * @param {number} b          Cell B index (neighbour).
+ * @param {number} dt         Simulated time step in seconds.
+ * @param {number} dirFromA   DIRS index whose direction is "A → B".
+ * @param {number} dirFromB   DIRS index whose direction is "B → A".
+ */
 export function waterPairBiased(a, b, dt, dirFromA, dirFromB) {
   const sa = surfaceField[a] + State.Wtmp[a];
   const sb = surfaceField[b] + State.Wtmp[b];
@@ -202,8 +249,17 @@ export function waterPairBiased(a, b, dt, dirFromA, dirFromB) {
 }
 
 // ---------- Aquifer pair flux ----------
-// Same shape as water, but the bias weight is smaller — aquifers concentrate
-// in valleys instead of streaming.
+/**
+ * Same shape as `waterPairBiased` but for the subsurface aquifer. The
+ * bias weight is smaller — aquifers concentrate in valleys instead of
+ * streaming. No sediment flux.
+ *
+ * @param {number} a          Cell A index.
+ * @param {number} b          Cell B index (neighbour).
+ * @param {number} dt         Simulated time step in seconds.
+ * @param {number} dirFromA   DIRS index whose direction is "A → B".
+ * @param {number} dirFromB   DIRS index whose direction is "B → A".
+ */
 export function aqPair(a, b, dt, dirFromA, dirFromB) {
   const hA = surfaceField[a] + State.Aqtmp[a];
   const hB = surfaceField[b] + State.Aqtmp[b];
@@ -225,7 +281,15 @@ export function aqPair(a, b, dt, dirFromA, dirFromB) {
   State.Aqtmp[dst] += q;
 }
 
-// Sweep water across the whole grid (alternating direction for symmetry).
+/**
+ * One sweep of surface-water advection across the whole grid. Called
+ * twice per step from `stepWater` with alternating `reverse` so the
+ * scheme is symmetric. Writes `Wtmp`/`Sedtmp`/`Fmag`, then copies back
+ * to `W`/`Sed`.
+ *
+ * @param {number}  dt       Simulated time step in seconds.
+ * @param {boolean} reverse  If true, sweep bottom-right → top-left.
+ */
 export function advectWater(dt, reverse) {
   State.Wtmp.set(State.W); State.Sedtmp.set(State.Sed); State.Fmag.fill(0);
   if (!reverse) {
@@ -258,7 +322,13 @@ export function advectWater(dt, reverse) {
   State.W.set(State.Wtmp); State.Sed.set(State.Sedtmp);
 }
 
-// Same shape as advectWater but for aquifers, with a different rate/interval.
+/**
+ * Same shape as `advectWater` but for the subsurface aquifer. Uses a
+ * separate scratch buffer (`Aqtmp`) and doesn't carry sediment.
+ *
+ * @param {number}  dt       Simulated time step in seconds.
+ * @param {boolean} reverse  If true, sweep bottom-right → top-left.
+ */
 export function advectAq(dt, reverse) {
   State.Aqtmp.set(State.Aq);
   if (!reverse) {

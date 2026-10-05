@@ -9,8 +9,20 @@ const { FILL_RATE: LAKE_FILL_RATE, DRAIN_RATE: LAKE_DRAIN_RATE } = LAKES;
 const { K_DRAIN_ROUTING } = HYDROLOGY;
 import { State, Globals, H1, H2, H3, H4, H1t, H2t, H3t, H4t, surfaceField } from './state.js';
 
-// Move sediment between a pair of cells until both sit within TALUS[i] of each other,
-// layer-by-layer from soft soil down to hard rock. Also diffuse H1 between neighbours.
+/**
+ * Avalanche one cell-pair down toward each other. If the surface delta
+ * exceeds the softest TALUS threshold, move sediment layer-by-layer from
+ * the higher to the lower cell (soft soil first, then gravel, then soft
+ * rock, then hard rock) at `SLIDE_K` rate. Then diffuse the soil layer
+ * itself so flat plateaus don't stay perfectly flat.
+ *
+ * Mutates the `H1t..H4t` scratch buffers; the caller copies back at the
+ * end of the sweep.
+ *
+ * @param {number} a   First cell index.
+ * @param {number} b   Neighbour index.
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function talusPair(a, b, dt) {
   const hA = H1t[a] + H2t[a] + H3t[a] + H4t[a];
   const hB = H1t[b] + H2t[b] + H3t[b] + H4t[b];
@@ -41,7 +53,11 @@ export function talusPair(a, b, dt) {
   }
 }
 
-// Sweep talusPair over the 4-neighbour grid, copy results back.
+/**
+ * One sweep of `talusPair` over the 4-neighbour grid. Copies `H1..H4`
+ * into `H1t..H4t` first, applies the slide, then copies back.
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function applyTalus(dt) {
   H1t.set(H1); H2t.set(H2); H3t.set(H3); H4t.set(H4);
   for (let j = 0; j < N; j++) {
@@ -56,7 +72,22 @@ export function applyTalus(dt) {
   H1.set(H1t); H2.set(H2t); H3.set(H3t); H4.set(H4t);
 }
 
-// Transport-limited erosion/deposition driven by water flux and slope.
+/**
+ * Transport-limited river erosion/deposition. For every land cell we
+ * compute a transport capacity from the local slope and water flux
+ * (Fmag + upstream drainage term), and either:
+ *
+ *   - Erode: if `capacity > sediment`, lift `amount` from H1..H4
+ *     (H4 only gets `K_ERODE_ROCK` of the remainder) and add the
+ *     equivalent mass to `Sed`.
+ *   - Deposit: if `sediment > capacity`, drop `amount` back to H1.
+ *
+ * Mutates `H1..H4` and `Sed` in place. Caller is expected to call
+ * `recomputeSurface()` afterwards so the cached height matches the new
+ * stack.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function riverErosion(dt) {
   for (let j = 0; j < N; j++) {
     const jN = j === N - 1 ? 0 : j + 1;
@@ -102,7 +133,14 @@ export function riverErosion(dt) {
   }
 }
 
-// Evaporation drains shallow water; tiny residues get snapped to zero.
+/**
+ * Evaporation drains shallow water at `EVAP` per second; once a cell's
+ * water depth drops below `1e-5` we also snap its sediment to zero.
+ * Standalone helper — the pipeline currently fuses this with the lake
+ * step in `stepEvapLakes` and doesn't call `evaporate` directly.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function evaporate(dt) {
   const ev = Math.max(0, 1 - EVAP * dt);
   for (let k = 0; k < N * N; k++) {
@@ -111,7 +149,15 @@ export function evaporate(dt) {
   }
 }
 
-// Ocean cells are clamped to sea level; lakes fill/drain toward spill level.
+/**
+ * Ocean cells are clamped so their water depth equals
+ * `seaLevel - surface`. Land cells with a non-trivial lake target (from
+ * `computeSpillLevels`) move their water depth toward that target at
+ * `FILL_RATE` (rises) / `DRAIN_RATE` (falls). Standalone helper — the
+ * pipeline currently fuses this with `evaporate` in `stepEvapLakes`.
+ *
+ * @param {number} dt  Simulated time step in seconds.
+ */
 export function applyLakes(dt) {
   for (let k = 0; k < N * N; k++) {
     const surface = surfaceField[k];
