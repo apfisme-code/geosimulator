@@ -90,7 +90,9 @@ function eruptPlume(v) {
       const kk = nj * N + ni;
       const craterWeight = Math.exp(-d2 / (2 * CRATER_SIG * CRATER_SIG));
       const addH = lavaVolume * craterWeight;
-      H4[kk] += addH;
+      // Active molten lava only — H4 grows from cooled lavaBonus inside
+      // `stepLavaCool` so each eruption doesn't permanently double-dip into
+      // the bedrock layer.
       State.lavaBonus[kk] += addH;
       if (d2 < HEAT_RADIUS * HEAT_RADIUS) {
         State.eruptHeat[kk] = Math.min(1, State.eruptHeat[kk] + HEAT_AMOUNT * craterWeight);

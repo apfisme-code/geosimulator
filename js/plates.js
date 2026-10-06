@@ -292,9 +292,11 @@ export function computeWorleyFields() {
     }
   }
 
-  // Lava is part of the permanent target — relaxation must not eat the cone.
-  const TGT2 = State.targetSurface, LBO = State.lavaBonus;
-  for (let k = 0; k < N * N; k++) TGT2[k] += LBO[k];
+  // `lavaBonus` is NOT baked into `targetSurface` anymore — active molten
+  // lava is added to the relaxation pull on the fly in `stepRelax`, and
+  // cooled mass joins `H4` directly via `stepLavaCool`. Previously the
+  // bonus accumulated across every eruption and drifted with the plates,
+  // which turned the whole world into a lava field.
 }
 
 /**

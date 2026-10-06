@@ -7,7 +7,7 @@
 //
 // Each step is a small named function below; STEPS only references them.
 
-import { GRID, SIM, ICE, PLATES, EROSION, LAKES } from './constants.js';
+import { GRID, SIM, ICE, PLATES, EROSION, LAKES, VOLCANO } from './constants.js';
 const { N, L } = GRID;
 const { DRIFT_INTERVAL, ADVECT_INTERVAL, FLOW_ROUTING_INTERVAL,
         CLIMATE_INTERVAL, AQ_FLOW_INTERVAL } = SIM;
@@ -15,6 +15,7 @@ const { AQ_MAX } = ICE;
 const { RELAX_K, MANTLE_RATE, BLEND_WIDTH } = PLATES;
 const { EVAP } = EROSION;
 const { FILL_RATE: LAKE_FILL_RATE, DRAIN_RATE: LAKE_DRAIN_RATE } = LAKES;
+const { COOL_RATE: LAVA_COOL_RATE } = VOLCANO;
 import { State, Globals, resetCounters, recomputeSurface, H1, H2, H3, H4, surfaceField } from './state.js';
 import { bilinearWrap } from './utils.js';
 import {
@@ -80,12 +81,13 @@ function advectLayers(dtAdv) {
       State.H2t[idx] = bilinearWrap(H2, sx, sz);
       State.H3t[idx] = bilinearWrap(H3, sx, sz);
       State.H4t[idx] = bilinearWrap(H4, sx, sz);
-      // Lava drifts with the plate so cones survive drift over oceans.
-      State.lavaBonusT[idx] = bilinearWrap(State.lavaBonus, sx, sz);
+      // `lavaBonus` stays put — it tracks the molten lava tied to the
+      // eruption site, not the underlying bedrock plate. Drifting it used
+      // to smear the active field across the world via bilinear sampling
+      // and accumulate without bound.
     }
   }
   H1.set(State.H1t); H2.set(State.H2t); H3.set(State.H3t); H4.set(State.H4t);
-  State.lavaBonus.set(State.lavaBonusT);
 }
 /** Fill depressions and build the D8 flow-direction + flow-accumulation
  *  routing maps used by climate humidity and river erosion.
@@ -112,21 +114,52 @@ function stepClimate(dt, t /*, c */) {
 /** Run pending volcano eruptions (lava + ash + heat), decay old heat/ash. */
 function stepVolcanoes(/* dt, t, c */) { tickVolcanoes(); }
 
-/** Relax H4 toward targetSurface + add mantle uplift. Per-cell phase
- *  shift from mantleField prevents the whole planet from pulsing in sync. */
+/** Relax H4 toward `targetSurface + lavaBonus` plus mantle uplift.
+ *  Per-cell phase shift from `mantleField` prevents the whole planet
+ *  from pulsing in sync. `lavaBonus` is the active (yet-to-solidify)
+ *  volcanic deposit — including it here keeps the cone visible while
+ *  it's molten, and the cone naturally shrinks as `lavaBonus` decays
+ *  through `stepLavaCool`. Per-cell phase shift from mantleField
+ *  prevents the whole planet from pulsing in sync. */
 function stepRelax(dt, t /*, c */) {
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const k = j * N + i;
       const surface = surfaceField[k];
       const target  = State.targetSurface[k];
+      const lb      = State.lavaBonus[k];
       const m = State.mantleField[k];
       const pulse = 0.7 + 0.3 * Math.sin(t * 0.11 + m * 5.0);
-      const dH4 = RELAX_K * (target - surface) * pulse * dt
+      const dH4 = RELAX_K * (target + lb - surface) * pulse * dt
                 + MANTLE_RATE * m * dt;
       H4[k] += dH4;
       surfaceField[k] += dH4;
     }
+  }
+}
+
+/** Solidify active molten lava: decay `lavaBonus` exponentially at
+ *  `LAVA_COOL_RATE` and transfer the cooled mass into `H4` (basalt) plus
+ *  `surfaceField` so the deposit becomes part of the permanent geological
+ *  record. Without this step, every eruption piled mass into a global
+ *  `lavaBonus` field that drifted and accumulated forever — turning the
+ *  whole world into a lava field after enough time. */
+function stepLavaCool(dt /*, t, c */) {
+  const factor = 1 - Math.exp(-LAVA_COOL_RATE * dt);
+  for (let k = 0; k < N * N; k++) {
+    const lb = State.lavaBonus[k];
+    if (lb <= 0) continue;
+    if (lb < 0.005) {
+      // Flush the residual into H4 so we don't leave crumbs.
+      H4[k] += lb;
+      surfaceField[k] += lb;
+      State.lavaBonus[k] = 0;
+      continue;
+    }
+    const cooled = lb * factor;
+    State.lavaBonus[k] -= cooled;
+    H4[k] += cooled;
+    surfaceField[k] += cooled;
   }
 }
 
@@ -261,6 +294,7 @@ const STEPS = [
   // every tick
   { name: 'volcanoes', every: null, fn: stepVolcanoes },
   { name: 'relax',     every: null, fn: stepRelax    },
+  { name: 'lava_cool', every: null, fn: stepLavaCool },
   { name: 'talus',     every: null, fn: stepTalus    },
   { name: 'lithify',   every: null, fn: stepLithify  },
   { name: 'ice',       every: null, fn: stepIce      },

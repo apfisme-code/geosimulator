@@ -327,6 +327,10 @@ export const VOLCANO = {
   ASH_SIG:         12,
   ASH_VOLUME:      0.35,
   ASH_LAYER_MAX:    2.0,
+  /** Exponential solidification rate of `lavaBonus` (1/simulated-second).
+   *  Cooled mass joins `H4` as permanent basalt so the active molten
+   *  field stays finite across many eruptions. Half-life ≈ 46 sec. */
+  COOL_RATE:        0.015,
 };
 
 // ---------- Overlay, history rings ----------
