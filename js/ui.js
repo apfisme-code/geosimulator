@@ -222,7 +222,7 @@ export function updateHUD() {
     `рельеф ${stats[0].toFixed(1)}…${stats[1].toFixed(1)} м  T=${stats[11].toFixed(2)}  H=${stats[12].toFixed(2)}\n` +
     `ср. слои H1..H4: ${stats[2].toFixed(2)} / ${stats[3].toFixed(2)} / ${stats[4].toFixed(2)} / ${stats[5].toFixed(2)}\n` +
     `вода ${stats[6].toFixed(3)}  водосбор ср./макс: ${stats[9].toFixed(1)} / ${stats[10].toFixed(0)}\n` +
-    `зажимов<0: ${Globals.simClampViolations}`;
+    `clamp: ${Globals.simClampViolations}`;
 }
 
 /**
