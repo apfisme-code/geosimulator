@@ -150,6 +150,34 @@ export function renderGraphs() {
   drawLine(State.histSea,    v => Hc - ((v - seaMin) / (seaMax - seaMin)) * H2s * 0.95 - 2, '#ff7b7b');
   drawLine(State.histPlates, v => Hc - (v / MAX_PLATES) * H2s * 0.5 - 2, '#ffcc66');
   drawLine(State.histAq,     v => Hc - (v / 2.0) * H2s * 0.4 - 2, '#66d9ff');
+
+  // Mini-legend in the top-right corner: 6 swatches in 2 rows × 3 columns.
+  // Each row reads: суша/снег/лёд, sea/плит/Aq — same order as the lines
+  // are drawn above, so the eye can match line colour to label easily.
+  graphCtx.font = '11px monospace';
+  const legendItems = [
+    { c: '#7bc47b', t: 'суша' },
+    { c: '#ffffff', t: 'снег' },
+    { c: '#7bc4ff', t: 'лёд' },
+    { c: '#ff7b7b', t: 'sea' },
+    { c: '#ffcc66', t: 'плит' },
+    { c: '#66d9ff', t: 'Aq'  },
+  ];
+  const LEG_COLS = 3;
+  const LEG_CELL = 52;
+  const LEG_W = LEG_COLS * LEG_CELL;
+  const LEG_X = Wc - LEG_W - 8;
+  for (let li = 0; li < legendItems.length; li++) {
+    const col = li % LEG_COLS;
+    const row = (li / LEG_COLS) | 0;
+    const x = LEG_X + col * LEG_CELL;
+    const y = 12 + row * 14;
+    graphCtx.fillStyle = legendItems[li].c;
+    graphCtx.fillRect(x, y - 8, 8, 8);
+    graphCtx.fillStyle = '#aaa';
+    graphCtx.fillText(legendItems[li].t, x + 11, y);
+  }
+
   graphCtx.fillStyle = '#cfe';
   graphCtx.font = '11px monospace';
   graphCtx.fillText('5 минут истории', 8, 14);
