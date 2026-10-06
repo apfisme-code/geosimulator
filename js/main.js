@@ -8,7 +8,7 @@ import { resetTerrain, simulate } from './sim.js';
 import { sampleHeight } from './surface.js';
 import {
   renderer, scene, camera,
-  syncTextures, positionTiles,
+  syncTextures, positionTiles, updateDayNight,
 } from './render.js';
 import { tickPlayer, player } from './player.js';
 import { renderSlice, renderGraphs, updateHUD, periodicUI } from './ui.js';
@@ -91,6 +91,10 @@ function tick(now) {
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
   positionTiles(player.x, player.z);
+
+  // Day/night cycle — runs every frame (not just every sim tick) so
+  // shadows shift smoothly even when the simulation is paused.
+  updateDayNight(Globals.simTime);
 
   if (Globals.showSlice && (Globals.simStepCount % 5 === 0)) renderSlice();
   graphTimer += dt;

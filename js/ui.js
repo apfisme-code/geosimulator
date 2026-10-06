@@ -213,6 +213,7 @@ export function updateHUD() {
   hud.textContent =
     `x=${player.x.toFixed(1)}  z=${player.z.toFixed(1)}  y=${Globals.feetY.toFixed(2)}\n` +
     `t=${Globals.simTime.toFixed(1)}с  ${Globals.paused ? 'ПАУЗА' : 'идёт'}  seed=${Globals.worldSeed}\n` +
+    `время суток: ${Globals.timeOfDay}  (${(Globals.dayPhase * 100).toFixed(0)}% цикла)\n` +
     `биом: ${biomeAtPlayer()}  |  seaLevel=${Globals.seaLevel.toFixed(2)} м\n` +
     `плит: ${activePlates}/${MAX_PLATES}  рожд. ${Globals.birthsTotal}  смерт. ${Globals.deathsTotal}\n` +
     `плюмов: ${Globals.plumes.length}  извержений: ${Globals.eruptionsTotal}  последнее: ${lastEruptAgo}с назад${Globals.lastEruption.underwater ? ' (подводное)' : ''}\n` +

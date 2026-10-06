@@ -383,6 +383,11 @@ export const Globals = {
   histHead: 0,
   histCount: 0,
   stats: new Array(16).fill(0),
+  /** Current day-night cycle phase in [0,1]. 0/1 = midnight, 0.5 = noon.
+   *  Updated by `render.updateDayNight()` once per frame. @type {number} */
+  dayPhase: 0,
+  /** Human-readable time-of-day string ('Ночь' / 'Рассвет' / 'День' / 'Закат'). */
+  timeOfDay: 'День',
 };
 
 /**

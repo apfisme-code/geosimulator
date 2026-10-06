@@ -542,6 +542,11 @@ const waterFS = `
 export const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
 const skyColor = new THREE.Color(0x8fadc9);
@@ -554,11 +559,58 @@ scene.fog = new THREE.Fog(skyColor, L * 0.15, L * 0.55);
 /** Perspective camera positioned at the player every frame.
  *  @type {THREE.PerspectiveCamera} */
 export const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, L * 2);
-scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x3a2a18, 0.9));
-const sunDir = new THREE.Vector3(0.6, 1.0, 0.3).normalize();
+
+/** Length of one full day-night cycle in simulated seconds (20 min).
+ *  @type {number} */
+const DAY_CYCLE_SEC = 1200;
+
+// Shadow camera orthographic extent — must cover the visible 3×3 tile
+// block around the player. 3·L = 960, but the player mostly sees the
+// central ~1.5·L region, so 400 each side (800×800) is plenty.
+const SHADOW_HALF = 400;
+
+/** Sun directional light — casts shadows. Position is updated every
+ *  frame from `updateDayNight()`. @type {THREE.DirectionalLight} */
 const sun = new THREE.DirectionalLight(0xfff0d0, 1.4);
-sun.position.copy(sunDir).multiplyScalar(200);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far  = 700;
+sun.shadow.camera.left   = -SHADOW_HALF;
+sun.shadow.camera.right  =  SHADOW_HALF;
+sun.shadow.camera.top    =  SHADOW_HALF;
+sun.shadow.camera.bottom = -SHADOW_HALF;
+sun.shadow.bias = -0.0006;
+sun.shadow.normalBias = 0.05;
+sun.shadow.radius = 3;
+sun.position.set(120, 220, 60);
 scene.add(sun);
+scene.add(sun.target);
+
+/** Moon directional light — opposite of sun, dim and bluish. Also
+ * casts its own shadow map so night-time terrain stays readable.
+ * @type {THREE.DirectionalLight} */
+const moon = new THREE.DirectionalLight(0xb0c4ff, 0);
+moon.castShadow = true;
+moon.shadow.mapSize.set(1024, 1024);
+moon.shadow.camera.near = 1;
+moon.shadow.camera.far  = 700;
+moon.shadow.camera.left   = -SHADOW_HALF;
+moon.shadow.camera.right  =  SHADOW_HALF;
+moon.shadow.camera.top    =  SHADOW_HALF;
+moon.shadow.camera.bottom = -SHADOW_HALF;
+moon.shadow.bias = -0.0006;
+moon.shadow.normalBias = 0.05;
+moon.shadow.radius = 4;
+moon.position.set(-120, -60, 60);
+scene.add(moon);
+scene.add(moon.target);
+
+/** Ambient fill — colour + intensity track the sky. The custom terrain
+ * and water shaders use `uAmbient` (this feed goes into that uniform too).
+ * @type {THREE.AmbientLight} */
+const ambient = new THREE.AmbientLight(0x405a80, 0.6);
+scene.add(ambient);
 
 // ---------- Materials ----------
 /**
@@ -587,7 +639,7 @@ export const terrainMat = new THREE.ShaderMaterial({
     uWaterMix: { value: 0.0 },
     uSeaLevel: { value: 0.0 },
     uOverlayMode: { value: 0 },
-    uLightDir: { value: sunDir.clone() },
+    uLightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
     uAmbient:  { value: new THREE.Color(0x405a80) },
     uSunColor: { value: new THREE.Color(0xfff0d0) },
   },
@@ -618,7 +670,7 @@ export const waterMat = new THREE.ShaderMaterial({
     uWaterMix: { value: 1.0 },
     uSeaLevel: { value: 0.0 },
     uOverlayMode: { value: 0 },
-    uLightDir: { value: sunDir.clone() },
+    uLightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
     uAmbient:  { value: new THREE.Color(0x405a80) },
     uSunColor: { value: new THREE.Color(0xfff0d0) },
     uCamera:   { value: new THREE.Vector3() },
@@ -629,6 +681,123 @@ export const waterMat = new THREE.ShaderMaterial({
   depthWrite: false,
   side: THREE.DoubleSide,
 });
+
+// ---------- Custom depth materials for shadow casting ----------
+// The terrain vertex shader does displacement via the texH texture, so
+// the default flat geometry won't cast correct depth. We re-implement
+// the same displacement here for the shadow pass.
+const terrainDepthVS = `
+  uniform sampler2D texH;
+  uniform sampler2D texVol;
+  uniform float uSeaLevel;
+
+  void main() {
+    vec2 uvc = uv;
+    vec4 h4 = texture(texH, uvc);
+    float surface = h4.x + h4.y + h4.z + h4.w;
+    float snow = texture(texVol, uvc).a;
+    float snowOnLand = surface > uSeaLevel ? snow : 0.0;
+    vec3 pos = position;
+    pos.y = surface + snowOnLand;
+    vec4 world = modelMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+const terrainDepthFS = `
+  precision highp float;
+  vec4 packDepthToRGBA(float v) {
+    vec4 r = vec4(fract(v * vec3(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0)));
+    r.yzw -= r.xyz * (1.0 / 256.0);
+    return r * (256.0 / 255.0);
+  }
+  out vec4 fragColor;
+  void main() { fragColor = packDepthToRGBA(gl_FragCoord.z); }
+`;
+/** Shadow depth material for terrain — re-uses `terrainMat`'s uniforms
+ *  so it always sees the latest height stack. @type {THREE.ShaderMaterial} */
+const terrainDepthMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  uniforms: terrainMat.uniforms,
+  vertexShader: terrainDepthVS,
+  fragmentShader: terrainDepthFS,
+});
+
+const waterDepthVS = `
+  uniform sampler2D texH;
+  uniform sampler2D texVol;
+  uniform float uSeaLevel;
+
+  void main() {
+    vec2 uvc = uv;
+    vec4 vol = texture(texVol, uvc);
+    vec3 pos = position;
+    float hasIce = step(0.02, vol.b);
+    pos.y = uSeaLevel + hasIce * (0.08 * vol.b + vol.a);
+    vec4 world = modelMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+const waterDepthFS = terrainDepthFS;
+/** Shadow depth material for water. @type {THREE.ShaderMaterial} */
+const waterDepthMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  uniforms: waterMat.uniforms,
+  vertexShader: waterDepthVS,
+  fragmentShader: waterDepthFS,
+});
+
+// ---------- Sun & moon visual discs ----------
+/** Build a 256² canvas with a radial gradient — used for the sun/moon
+ *  sprite textures. @param {string[]} stops  [pos, rgba, pos, rgba, …]
+ *  @returns {THREE.CanvasTexture} */
+function makeDiscTexture(stops) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  for (let i = 0; i < stops.length; i += 2) {
+    grad.addColorStop(stops[i], stops[i + 1]);
+  }
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Sun sprite — placed far away in the sun direction. @type {THREE.Sprite} */
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeDiscTexture([
+    0.00, 'rgba(255, 248, 220, 1.00)',
+    0.18, 'rgba(255, 235, 180, 0.95)',
+    0.36, 'rgba(255, 200, 130, 0.55)',
+    0.55, 'rgba(255, 160,  90, 0.20)',
+    1.00, 'rgba(255, 110,  50, 0.00)',
+  ]),
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+}));
+sunSprite.scale.set(60, 60, 1);
+sunSprite.renderOrder = 2;
+scene.add(sunSprite);
+
+/** Moon sprite — placed opposite the sun. @type {THREE.Sprite} */
+const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeDiscTexture([
+    0.00, 'rgba(255, 255, 250, 1.00)',
+    0.30, 'rgba(230, 232, 235, 0.95)',
+    0.42, 'rgba(180, 188, 200, 0.45)',
+    0.55, 'rgba(120, 135, 165, 0.15)',
+    1.00, 'rgba( 80, 100, 140, 0.00)',
+  ]),
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.NormalBlending,
+}));
+moonSprite.scale.set(45, 45, 1);
+moonSprite.renderOrder = 2;
+scene.add(moonSprite);
 
 // ---------- Toroidal tile group (3×3 around the player) ----------
 const terrainGeo = buildGridGeometry();
@@ -642,11 +811,17 @@ for (let i = -1; i <= 1; i++) {
   for (let j = -1; j <= 1; j++) {
     const mt = new THREE.Mesh(terrainGeo, terrainMat);
     mt.matrixAutoUpdate = false; mt.frustumCulled = false;
+    mt.castShadow    = true;
+    mt.receiveShadow = true;
+    mt.customDepthMaterial = terrainDepthMat;
     scene.add(mt); terrainTiles.push({ mesh: mt, i, j });
 
     const mw = new THREE.Mesh(terrainGeo, waterMat);
     mw.matrixAutoUpdate = false; mw.frustumCulled = false;
     mw.renderOrder = 1;
+    mw.castShadow    = true;
+    mw.receiveShadow = false;
+    mw.customDepthMaterial = waterDepthMat;
     scene.add(mw); waterTiles.push({ mesh: mw, i, j });
   }
 }
@@ -676,6 +851,142 @@ export function positionTiles(playerX, playerZ) {
   waterMat.uniforms.uCamera.value.copy(camera.position);
   waterMat.uniforms.uSeaLevel.value = Globals.seaLevel;
   terrainMat.uniforms.uSeaLevel.value = Globals.seaLevel;
+}
+
+/**
+ * Drive the day/night cycle. The cycle is `DAY_CYCLE_SEC` simulated
+ * seconds long; one tick maps to a phase `t = simTime / cycle` and we
+ * compute sun/moon position, colour, intensity, sky colour, fog colour,
+ * and push the relevant uniforms into the terrain and water materials.
+ *
+ * The 24 h curve:
+ *   t = 0.00  → midnight   (sun below horizon, moon overhead)
+ *   t = 0.25  → 6 am       (sun on east horizon,  dawn)
+ *   t = 0.50  → noon       (sun overhead, moon below)
+ *   t = 0.75  → 6 pm       (sun on west horizon, dusk)
+ *
+ * `sunElev = −cos(2π·t)`  (1 at noon, −1 at midnight)
+ * `sunAzim = sin(2π·t)`   (east positive, west negative)
+ *
+ * A small southward tilt (sz = 0.35) keeps shadows cast on the ground
+ * even when the sun is directly overhead.
+ *
+ * Called from `main.js` once per animation frame.
+ *
+ * @param {number} simTime  Accumulated simulated seconds.
+ */
+export function updateDayNight(simTime) {
+  const dayFrac = ((simTime % DAY_CYCLE_SEC) + DAY_CYCLE_SEC) % DAY_CYCLE_SEC / DAY_CYCLE_SEC;
+  const ang = dayFrac * Math.PI * 2;
+  Globals.dayPhase = dayFrac;
+
+  // Sun direction (where the light comes FROM). y is elevation in [−1,1].
+  const sunElev = -Math.cos(ang);
+  const sunAzim =  Math.sin(ang);
+  const sx = sunAzim * 0.55;
+  const sy = Math.max(-0.20, sunElev);
+  const sz = 0.35;
+  const sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
+  const sxN = sx / sl, syN = sy / sl, szN = sz / sl;
+
+  sun.position.set(sxN * 300, syN * 300, szN * 300);
+  sun.target.position.set(0, 0, 0);
+  sun.target.updateMatrixWorld();
+
+  // Smooth ramp over the horizon — below sunElev 0.02 the light is off,
+  // ramps up over a 0.16-unit band to full at sunrise, then stays at 1
+  // until sunset. Same curve on the way down.
+  let sunFactor;
+  if      (sunElev <  0.02) sunFactor = 0;
+  else if (sunElev <  0.18) sunFactor = (sunElev - 0.02) / 0.16;
+  else                      sunFactor = 1;
+  sun.intensity = 1.7 * sunFactor;
+
+  // Sun colour: warm white at noon, deep orange near horizon.
+  if (sunElev > 0.28) sun.color.setHex(0xfff0d0);
+  else if (sunElev > 0.10) {
+    const t = (sunElev - 0.10) / 0.18;
+    sun.color.setRGB(1.0, 0.50 + t * 0.44, 0.30 + t * 0.70);
+  } else {
+    sun.color.setHex(0xff6a30);
+  }
+
+  // Moon is exactly opposite the sun.
+  const moonElev = -sunElev;
+  const moonAzim = -sunAzim;
+  const mx = moonAzim * 0.55;
+  const my = Math.max(-0.20, moonElev);
+  const mz = 0.35;
+  const ml = Math.sqrt(mx * mx + my * my + mz * mz);
+
+  moon.position.set((mx / ml) * 300, (my / ml) * 300, (mz / ml) * 300);
+  moon.target.position.set(0, 0, 0);
+  moon.target.updateMatrixWorld();
+
+  let moonFactor;
+  if      (moonElev <  0.02) moonFactor = 0;
+  else if (moonElev <  0.20) moonFactor = (moonElev - 0.02) / 0.18;
+  else                       moonFactor = 1;
+  moon.intensity = 0.45 * moonFactor;
+  moon.color.setHex(moonElev > 0.20 ? 0xb6c8ff : 0x5878b0);
+
+  // Sky colour blends through night → dawn/dusk → day.
+  const dayness = Math.max(0, sunElev);
+  let sr, sg, sb;
+  if (dayness > 0.45) {
+    sr = 0.56; sg = 0.68; sb = 0.79;            // day
+  } else if (dayness > 0.10) {
+    const t = (dayness - 0.10) / 0.35;
+    sr = 0.36 + t * 0.20;                       // → day
+    sg = 0.36 + t * 0.32;
+    sb = 0.46 + t * 0.33;
+  } else if (dayness > 0.02) {
+    const t = dayness / 0.10;                   // dawn / dusk
+    sr = 0.08 + t * 0.28;
+    sg = 0.10 + t * 0.26;
+    sb = 0.18 + t * 0.28;
+  } else {
+    sr = 0.04; sg = 0.06; sb = 0.16;            // night
+  }
+  skyColor.setRGB(sr, sg, sb);
+  scene.fog.color.copy(skyColor);
+
+  // Ambient colour follows the sky but a touch cooler, intensity ramps
+  // with daylight so nights aren't pitch black.
+  ambient.color.setRGB(sr * 0.85, sg * 0.85, sb * 0.85);
+  ambient.intensity = 0.35 + dayness * 0.55;
+
+  // Push the lighting uniforms into the custom shaders so the terrain
+  // and water light with the same scene lighting.
+  const sunDirVec = sun.position.clone().normalize();
+  const ambR = ambient.color.r * ambient.intensity * 1.6;
+  const ambG = ambient.color.g * ambient.intensity * 1.6;
+  const ambB = ambient.color.b * ambient.intensity * 1.6;
+  terrainMat.uniforms.uLightDir.value.copy(sunDirVec);
+  terrainMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+  terrainMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
+  waterMat.uniforms.uLightDir.value.copy(sunDirVec);
+  waterMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+  waterMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
+
+  // Sun and moon sprite positions follow the same direction but live
+  // further out, with a smooth fade so they don't pop in/out at the
+  // horizon line.
+  const sunSpriteDist = 480;
+  sunSprite.position.set(sxN * sunSpriteDist, syN * sunSpriteDist, szN * sunSpriteDist);
+  sunSprite.material.opacity = Math.min(1, Math.max(0, sunElev * 5));
+
+  const moonSpriteDist = 460;
+  moonSprite.position.set((mx / ml) * moonSpriteDist, (my / ml) * moonSpriteDist, (mz / ml) * moonSpriteDist);
+  moonSprite.material.opacity = Math.min(1, Math.max(0, moonElev * 5));
+
+  // Time-of-day label for the HUD / debug.
+  let label;
+  if (dayFrac < 0.21 || dayFrac >= 0.79)      label = 'Ночь';
+  else if (dayFrac < 0.29)                    label = 'Рассвет';
+  else if (dayFrac < 0.71)                    label = 'День';
+  else                                        label = 'Закат';
+  Globals.timeOfDay = label;
 }
 
 // Window resize handler.
