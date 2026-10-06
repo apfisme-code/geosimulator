@@ -18,12 +18,15 @@
   #graphCanvas { position: fixed; right: 12px; bottom: 12px; width: 360px; height: 200px;
     background: rgba(0,0,0,.72); border-radius: 6px; pointer-events: none;
     display: none; z-index: 10; }
-  #start { position: fixed; inset: 0; display: grid; place-items: center; cursor: pointer;
+  #start { position: fixed; inset: 0; display: none; place-items: center; cursor: pointer;
     background: rgba(0,0,0,.72); color: #dfe; font: 20px/1.4 system-ui, sans-serif;
     text-align: center; user-select: none; z-index: 20; }
   #start small { display: block; margin-top: 12px; font-size: 14px; opacity: .78; line-height: 1.8 }
   #start kbd { background: #222; border: 1px solid #555; border-radius: 3px;
     padding: 1px 5px; font: 12px ui-monospace, monospace; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center;
+    background: rgba(0,0,0,.85); color: #dfe; font: 20px/1.4 system-ui, sans-serif;
+    text-align: center; z-index: 25; }
   #err { position: fixed; left: 12px; right: 12px; bottom: 12px; max-height: 40vh;
     overflow: auto; padding: 10px 14px; background: rgba(120,30,30,.92); color: #fee;
     font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; border-radius: 6px;
@@ -36,6 +39,7 @@
 <canvas id="sliceCanvas" width="640" height="140"></canvas>
 <canvas id="graphCanvas" width="360" height="200"></canvas>
 <pre id="err"></pre>
+<div id="loading">Генерация мира…</div>
 <div id="start">Нажмите, чтобы играть
   <small>
     <kbd>WASD</kbd> движ · <kbd>Мышь</kbd> обзор · <kbd>Shift</kbd> бег · <kbd>Space</kbd> прыжок · <kbd>Esc</kbd> выход<br>

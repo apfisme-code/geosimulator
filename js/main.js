@@ -46,6 +46,12 @@ try {
   throw e;
 }
 
+// Init done — swap the loading overlay for the start prompt.
+const loadingOverlay = document.getElementById('loading');
+const startOverlay = document.getElementById('start');
+if (loadingOverlay) loadingOverlay.style.display = 'none';
+if (startOverlay)   startOverlay.style.display   = 'grid';
+
 let last = performance.now();
 let simAccum = 0;
 let graphTimer = 0;
