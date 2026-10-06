@@ -324,6 +324,8 @@ const terrainFS = `
   uniform vec3  uLightDir;
   uniform vec3  uAmbient;
   uniform vec3  uSunColor;
+  uniform vec3  uMoonDir;
+  uniform vec3  uMoonColor;
   uniform int   uOverlayMode;
 
   in vec3  vWorld;
@@ -449,8 +451,12 @@ const terrainFS = `
     if (!gl_FrontFacing) N = -N;
     vec3 L = normalize(uLightDir);
     float diff = max(dot(N, L), 0.0);
+    vec3 Lm = normalize(uMoonDir);
+    float diffM = max(dot(N, Lm), 0.0);
     float lightFactor = (uOverlayMode == 0) ? 1.0 : 0.55;
-    vec3 colOut = col * (uAmbient * lightFactor + uSunColor * diff * lightFactor + (1.0 - lightFactor) * 0.5);
+    vec3 colOut = col * (uAmbient * lightFactor
+                        + (uSunColor * diff + uMoonColor * diffM) * lightFactor
+                        + (1.0 - lightFactor) * 0.5);
 
     if (uOverlayMode == 0 && vHeat > 0.02) {
       vec3 lava = vec3(1.0, 0.35, 0.05);
@@ -466,6 +472,8 @@ const waterFS = `
   uniform vec3  uLightDir;
   uniform vec3  uAmbient;
   uniform vec3  uSunColor;
+  uniform vec3  uMoonDir;
+  uniform vec3  uMoonColor;
   uniform vec3  uCamera;
   uniform int   uOverlayMode;
   in vec3  vWorld;
@@ -488,9 +496,11 @@ const waterFS = `
     vec3 N = normalize(vNormalW);
     if (!gl_FrontFacing) N = -N;
     vec3 L = normalize(uLightDir);
+    vec3 Lm = normalize(uMoonDir);
     vec3 V = normalize(uCamera - vWorld);
     vec3 Hv = normalize(L + V);
     float diff = max(dot(N, L), 0.0);
+    float diffM = max(dot(N, Lm), 0.0);
 
     if (uOverlayMode != 0) {
       vec3 col;
@@ -513,7 +523,7 @@ const waterFS = `
                         clamp(vIce * 0.3, 0.0, 1.0));
       if (vSnow > 0.02) iceCol = mix(iceCol, vec3(0.98, 0.99, 1.0), clamp(vSnow, 0.0, 1.0));
       float spec = pow(max(dot(N, Hv), 0.0), 120.0);
-      vec3 colOut = iceCol * (uAmbient + uSunColor * diff);
+      vec3 colOut = iceCol * (uAmbient + uSunColor * diff + uMoonColor * diffM);
       colOut += vec3(0.85, 0.92, 1.0) * spec * 0.7;
       if (vHeat > 0.02) colOut = mix(colOut, vec3(0.7, 0.35, 0.25), vHeat * 0.5);
       fragColor = vec4(colOut, 1.0);
@@ -527,7 +537,7 @@ const waterFS = `
     float turb = clamp(vSed / max(vW, 0.001) * 3.0, 0.0, 1.0);
     base = mix(base, vec3(0.37, 0.29, 0.18), turb * 0.4);
     float spec = pow(max(dot(N, Hv), 0.0), 140.0);
-    vec3 col = base * (uAmbient * 0.7 + uSunColor * diff);
+    vec3 col = base * (uAmbient * 0.7 + uSunColor * diff + uMoonColor * diffM);
     col += vec3(0.81, 0.89, 1.0) * spec * 0.9;
     float alpha = clamp(sqrt(vW * 2.0), 0.0, 0.85);
     alpha = max(alpha, clamp(vW * 25.0, 0.0, 0.85));
@@ -640,8 +650,10 @@ export const terrainMat = new THREE.ShaderMaterial({
     uSeaLevel: { value: 0.0 },
     uOverlayMode: { value: 0 },
     uLightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
-    uAmbient:  { value: new THREE.Color(0x405a80) },
     uSunColor: { value: new THREE.Color(0xfff0d0) },
+    uMoonDir:  { value: new THREE.Vector3(-0.3, 0.8, 0.3).normalize() },
+    uMoonColor: { value: new THREE.Color(0x000000) },
+    uAmbient:  { value: new THREE.Color(0x405a80) },
   },
   vertexShader: terrainVS,
   fragmentShader: terrainFS,
@@ -671,8 +683,10 @@ export const waterMat = new THREE.ShaderMaterial({
     uSeaLevel: { value: 0.0 },
     uOverlayMode: { value: 0 },
     uLightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
-    uAmbient:  { value: new THREE.Color(0x405a80) },
     uSunColor: { value: new THREE.Color(0xfff0d0) },
+    uMoonDir:  { value: new THREE.Vector3(-0.3, 0.8, 0.3).normalize() },
+    uMoonColor: { value: new THREE.Color(0x000000) },
+    uAmbient:  { value: new THREE.Color(0x405a80) },
     uCamera:   { value: new THREE.Vector3() },
   },
   vertexShader: waterVS,
@@ -777,6 +791,9 @@ const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
   transparent: true,
   depthWrite: false,
   blending: THREE.AdditiveBlending,
+  // The sun and moon are far away (~460u) but the scene fog is tuned for
+  // terrain (48..176u) so without `fog: false` they fade into haze.
+  fog: false,
 }));
 sunSprite.scale.set(60, 60, 1);
 sunSprite.renderOrder = 2;
@@ -794,6 +811,9 @@ const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
   transparent: true,
   depthWrite: false,
   blending: THREE.NormalBlending,
+  // Disable fog so the disc stays visible even though it sits far
+  // beyond the scene's terrain-tuned fog distance.
+  fog: false,
 }));
 moonSprite.scale.set(45, 45, 1);
 moonSprite.renderOrder = 2;
@@ -927,7 +947,7 @@ export function updateDayNight(simTime) {
   if      (moonElev <  0.02) moonFactor = 0;
   else if (moonElev <  0.20) moonFactor = (moonElev - 0.02) / 0.18;
   else                       moonFactor = 1;
-  moon.intensity = 0.45 * moonFactor;
+  moon.intensity = 0.7 * moonFactor;
   moon.color.setHex(moonElev > 0.20 ? 0xb6c8ff : 0x5878b0);
 
   // Sky colour blends through night → dawn/dusk → day.
@@ -959,14 +979,19 @@ export function updateDayNight(simTime) {
   // Push the lighting uniforms into the custom shaders so the terrain
   // and water light with the same scene lighting.
   const sunDirVec = sun.position.clone().normalize();
+  const moonDirVec = moon.position.clone().normalize();
   const ambR = ambient.color.r * ambient.intensity * 1.6;
   const ambG = ambient.color.g * ambient.intensity * 1.6;
   const ambB = ambient.color.b * ambient.intensity * 1.6;
   terrainMat.uniforms.uLightDir.value.copy(sunDirVec);
   terrainMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+  terrainMat.uniforms.uMoonDir.value.copy(moonDirVec);
+  terrainMat.uniforms.uMoonColor.value.copy(moon.color).multiplyScalar(moon.intensity);
   terrainMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
   waterMat.uniforms.uLightDir.value.copy(sunDirVec);
   waterMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+  waterMat.uniforms.uMoonDir.value.copy(moonDirVec);
+  waterMat.uniforms.uMoonColor.value.copy(moon.color).multiplyScalar(moon.intensity);
   waterMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
 
   // Sun and moon sprite positions follow the same direction but live
