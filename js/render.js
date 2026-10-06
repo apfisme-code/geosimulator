@@ -326,6 +326,8 @@ const terrainFS = `
   uniform vec3  uSunColor;
   uniform vec3  uMoonDir;
   uniform vec3  uMoonColor;
+  uniform vec3  uCamera;
+  uniform vec3  uFogColor;
   uniform int   uOverlayMode;
 
   in vec3  vWorld;
@@ -458,6 +460,19 @@ const terrainFS = `
                         + (uSunColor * diff + uMoonColor * diffM) * lightFactor
                         + (1.0 - lightFactor) * 0.5);
 
+    // Atmospheric haze — exponential falloff with view distance, density
+    // driven by per-cell humidity and inverse temperature. Humid air reads
+    // as thicker; warm air adds a little shimmer too.
+    float viewDist = length(vWorld - uCamera);
+    float fogDensity = 0.0040 * (0.55 + 1.40 * vHum) * (0.70 + 0.45 * (1.0 - vTemp));
+    float fogAmt = 1.0 - exp(-fogDensity * viewDist);
+    // Fog colour leans warmer when hot, brighter when humid so it picks
+    // up the sky's horizon tint and blends into it without a hard seam.
+    vec3 fogTint = mix(vec3(0.62, 0.70, 0.85), vec3(0.92, 0.88, 0.78), vTemp);
+    fogTint = mix(fogTint, vec3(0.95), vHum * 0.35);
+    vec3 fogCol = mix(fogTint, uFogColor, 0.65);
+    colOut = mix(colOut, fogCol, clamp(fogAmt, 0.0, 0.92));
+
     if (uOverlayMode == 0 && vHeat > 0.02) {
       vec3 lava = vec3(1.0, 0.35, 0.05);
       colOut = mix(colOut, lava, vHeat * 0.8);
@@ -475,6 +490,7 @@ const waterFS = `
   uniform vec3  uMoonDir;
   uniform vec3  uMoonColor;
   uniform vec3  uCamera;
+  uniform vec3  uFogColor;
   uniform int   uOverlayMode;
   in vec3  vWorld;
   in vec3  vNormalW;
@@ -539,6 +555,15 @@ const waterFS = `
     float spec = pow(max(dot(N, Hv), 0.0), 140.0);
     vec3 col = base * (uAmbient * 0.7 + uSunColor * diff + uMoonColor * diffM);
     col += vec3(0.81, 0.89, 1.0) * spec * 0.9;
+    // Atmospheric haze — same model as the terrain shader, density follows
+    // per-cell humidity/temperature.
+    float viewDist = length(vWorld - uCamera);
+    float fogDensity = 0.0040 * (0.55 + 1.40 * vHum) * (0.70 + 0.45 * (1.0 - vTemp));
+    float fogAmt = 1.0 - exp(-fogDensity * viewDist);
+    vec3 fogTint = mix(vec3(0.62, 0.70, 0.85), vec3(0.92, 0.88, 0.78), vTemp);
+    fogTint = mix(fogTint, vec3(0.95), vHum * 0.35);
+    vec3 fogCol = mix(fogTint, uFogColor, 0.65);
+    col = mix(col, fogCol, clamp(fogAmt * 0.9, 0.0, 0.92));
     float alpha = clamp(sqrt(vW * 2.0), 0.0, 0.85);
     alpha = max(alpha, clamp(vW * 25.0, 0.0, 0.85));
     fragColor = vec4(col, alpha);
@@ -559,12 +584,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
-const skyColor = new THREE.Color(0x8fadc9);
+const skyColor = new THREE.Color(0x8fadc9);  // legacy — no longer wired to anything; left for reference
 /** Three.js scene containing lights + the 3×3 tile group.
+ *  The sky is now drawn by a procedural sphere, and fog is applied
+ *  per-fragment inside the terrain and water shaders — both tied to
+ *  per-cell humidity and temperature. So no scene.background / scene.fog.
  *  @type {THREE.Scene} */
 export const scene = new THREE.Scene();
-scene.background = skyColor;
-scene.fog = new THREE.Fog(skyColor, L * 0.15, L * 0.55);
 
 /** Perspective camera positioned at the player every frame.
  *  @type {THREE.PerspectiveCamera} */
@@ -654,6 +680,8 @@ export const terrainMat = new THREE.ShaderMaterial({
     uMoonDir:  { value: new THREE.Vector3(-0.3, 0.8, 0.3).normalize() },
     uMoonColor: { value: new THREE.Color(0x000000) },
     uAmbient:  { value: new THREE.Color(0x405a80) },
+    uCamera:   { value: new THREE.Vector3() },
+    uFogColor: { value: new THREE.Color(0xb0c4d8) },
   },
   vertexShader: terrainVS,
   fragmentShader: terrainFS,
@@ -688,6 +716,7 @@ export const waterMat = new THREE.ShaderMaterial({
     uMoonColor: { value: new THREE.Color(0x000000) },
     uAmbient:  { value: new THREE.Color(0x405a80) },
     uCamera:   { value: new THREE.Vector3() },
+    uFogColor: { value: new THREE.Color(0xb0c4d8) },
   },
   vertexShader: waterVS,
   fragmentShader: waterFS,
@@ -760,64 +789,110 @@ const waterDepthMat = new THREE.ShaderMaterial({
   fragmentShader: waterDepthFS,
 });
 
-// ---------- Sun & moon visual discs ----------
-/** Build a 256² canvas with a radial gradient — used for the sun/moon
- *  sprite textures. @param {string[]} stops  [pos, rgba, pos, rgba, …]
- *  @returns {THREE.CanvasTexture} */
-function makeDiscTexture(stops) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-  for (let i = 0; i < stops.length; i += 2) {
-    grad.addColorStop(stops[i], stops[i + 1]);
+// ---------- Procedural sky sphere ----------
+// Big inverted sphere following the camera, rendered first so the
+// terrain/water draw on top of it. Replaces both the old solid `scene.background`
+// colour and the previous sun/moon Sprite hacks — sun and moon are now drawn
+// inside the sky shader with proper angular size and a soft corona.
+const skyVS = `
+  out vec3 vDir;
+  void main() {
+    vDir = normalize(position);
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 256, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
+`;
+const skyFS = `
+  precision highp float;
+  in vec3 vDir;
+  uniform vec3  uSunDir;
+  uniform vec3  uMoonDir;
+  uniform vec3  uSunColor;
+  uniform vec3  uMoonColor;
+  uniform vec3  uZenithColor;
+  uniform vec3  uHorizonColor;
+  uniform vec3  uGroundColor;
+  uniform float uDayness;
 
-/** Sun sprite — placed far away in the sun direction. @type {THREE.Sprite} */
-const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: makeDiscTexture([
-    0.00, 'rgba(255, 248, 220, 1.00)',
-    0.18, 'rgba(255, 235, 180, 0.95)',
-    0.36, 'rgba(255, 200, 130, 0.55)',
-    0.55, 'rgba(255, 160,  90, 0.20)',
-    1.00, 'rgba(255, 110,  50, 0.00)',
-  ]),
-  transparent: true,
-  depthWrite: false,
-  blending: THREE.AdditiveBlending,
-  // The sun and moon are far away (~460u) but the scene fog is tuned for
-  // terrain (48..176u) so without `fog: false` they fade into haze.
-  fog: false,
-}));
-sunSprite.scale.set(60, 60, 1);
-sunSprite.renderOrder = 2;
-scene.add(sunSprite);
+  out vec4 fragColor;
 
-/** Moon sprite — placed opposite the sun. @type {THREE.Sprite} */
-const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: makeDiscTexture([
-    0.00, 'rgba(255, 255, 250, 1.00)',
-    0.30, 'rgba(230, 232, 235, 0.95)',
-    0.42, 'rgba(180, 188, 200, 0.45)',
-    0.55, 'rgba(120, 135, 165, 0.15)',
-    1.00, 'rgba( 80, 100, 140, 0.00)',
-  ]),
-  transparent: true,
+  // Cheap deterministic hash for star field.
+  float hash13(vec3 p) {
+    p = fract(p * vec3(443.897, 441.423, 437.195));
+    p += dot(p, p.yzx + 19.19);
+    return fract((p.x + p.y) * p.z);
+  }
+
+  void main() {
+    vec3 dir = normalize(vDir);
+    float h = dir.y;
+
+    // Sky gradient: zenith above, horizon at h=0, ground below.
+    vec3 sky;
+    if (h >= 0.0) {
+      float t = pow(smoothstep(0.0, 1.0, h), 0.55);
+      sky = mix(uHorizonColor, uZenithColor, t);
+    } else {
+      float t = pow(smoothstep(0.0, 1.0, -h), 0.65);
+      sky = mix(uHorizonColor, uGroundColor, t);
+    }
+
+    // Solar atmospheric tint — Mie-like halo around the sun direction.
+    float sunDot = dot(dir, uSunDir);
+    float sunHalo = pow(max(sunDot, 0.0), 24.0);
+    sky += uSunColor * sunHalo * uDayness * 0.45;
+    // Sun disc — slightly larger than the moon so it reads as bright.
+    float sunDisc = smoothstep(0.99965, 0.99988, sunDot);
+    sky += uSunColor * sunDisc * (0.4 + 0.6 * uDayness) * 2.5;
+
+    // Lunar halo + disc.
+    float moonDot = dot(dir, uMoonDir);
+    float moonHalo = pow(max(moonDot, 0.0), 64.0);
+    sky += uMoonColor * moonHalo * 0.04;
+    float moonDisc = smoothstep(0.99978, 0.99992, moonDot);
+    sky += uMoonColor * moonDisc * 1.4;
+
+    // Star field — only above horizon, only when dayness is low.
+    float night = 1.0 - uDayness;
+    if (night > 0.35 && h > 0.0) {
+      vec3 cell = floor(dir * 90.0);
+      vec3 sub  = fract(dir * 90.0) - 0.5;
+      float r   = hash13(cell);
+      if (r > 0.992) {
+        float intensity = smoothstep(0.45, 0.0, length(sub));
+        intensity *= (r - 0.992) * 125.0 * night;
+        sky += vec3(intensity * 0.85);
+      }
+    }
+
+    fragColor = vec4(sky, 1.0);
+  }
+`;
+/** Sky-dome material. The shader reads sun/moon direction and colour from
+ *  the active Three.js lights and the time-of-day gradient from
+ *  `updateDayNight()`. @type {THREE.ShaderMaterial} */
+const skyMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  uniforms: {
+    uSunDir:        { value: new THREE.Vector3(0, 1, 0) },
+    uMoonDir:       { value: new THREE.Vector3(0, 1, 0) },
+    uSunColor:      { value: new THREE.Color(0xfff0d0) },
+    uMoonColor:     { value: new THREE.Color(0xb6c8ff) },
+    uZenithColor:   { value: new THREE.Color(0x4a78b0) },
+    uHorizonColor:  { value: new THREE.Color(0xb0c4d8) },
+    uGroundColor:   { value: new THREE.Color(0x252018) },
+    uDayness:       { value: 0.5 },
+  },
+  vertexShader: skyVS,
+  fragmentShader: skyFS,
+  side: THREE.BackSide,
   depthWrite: false,
-  blending: THREE.NormalBlending,
-  // Disable fog so the disc stays visible even though it sits far
-  // beyond the scene's terrain-tuned fog distance.
-  fog: false,
-}));
-moonSprite.scale.set(45, 45, 1);
-moonSprite.renderOrder = 2;
-scene.add(moonSprite);
+  depthTest: false,
+});
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(500, 48, 24), skyMat);
+skyMesh.renderOrder = -1000;       // draw before everything else
+skyMesh.frustumCulled = false;
+scene.add(skyMesh);
 
 // ---------- Toroidal tile group (3×3 around the player) ----------
 const terrainGeo = buildGridGeometry();
@@ -968,8 +1043,9 @@ export function updateDayNight(simTime) {
   } else {
     sr = 0.04; sg = 0.06; sb = 0.16;            // night
   }
-  skyColor.setRGB(sr, sg, sb);
-  scene.fog.color.copy(skyColor);
+  // Note: sky gradient is now driven entirely through the sky-dome
+  // shader uniforms (uZenithColor / uHorizonColor / uGroundColor) below.
+  // The legacy skyColor local is kept for documentation only.
 
   // Ambient colour follows the sky but a touch cooler, intensity ramps
   // with daylight so nights aren't pitch black.
@@ -988,22 +1064,33 @@ export function updateDayNight(simTime) {
   terrainMat.uniforms.uMoonDir.value.copy(moonDirVec);
   terrainMat.uniforms.uMoonColor.value.copy(moon.color).multiplyScalar(moon.intensity);
   terrainMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
+  terrainMat.uniforms.uCamera.value.copy(camera.position);
   waterMat.uniforms.uLightDir.value.copy(sunDirVec);
   waterMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
   waterMat.uniforms.uMoonDir.value.copy(moonDirVec);
   waterMat.uniforms.uMoonColor.value.copy(moon.color).multiplyScalar(moon.intensity);
   waterMat.uniforms.uAmbient.value.setRGB(ambR, ambG, ambB);
+  waterMat.uniforms.uCamera.value.copy(camera.position);
 
-  // Sun and moon sprite positions follow the same direction but live
-  // further out, with a smooth fade so they don't pop in/out at the
-  // horizon line.
-  const sunSpriteDist = 480;
-  sunSprite.position.set(sxN * sunSpriteDist, syN * sunSpriteDist, szN * sunSpriteDist);
-  sunSprite.material.opacity = Math.min(1, Math.max(0, sunElev * 5));
+  // Procedural sky — drives the dome's gradient, the sun/moon discs and
+  // their halos. The dome follows the camera so the player can move
+  // without the sky shifting against the world.
+  skyMat.uniforms.uSunDir.value.copy(sunDirVec);
+  skyMat.uniforms.uMoonDir.value.copy(moonDirVec);
+  skyMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+  skyMat.uniforms.uMoonColor.value.copy(moon.color).multiplyScalar(moon.intensity);
+  skyMat.uniforms.uZenithColor.value.setRGB(sr * 0.55, sg * 0.75, sb * 0.95);
+  skyMat.uniforms.uHorizonColor.value.setRGB(sr * 1.45, sg * 1.25, sb * 0.95);
+  skyMat.uniforms.uGroundColor.value.setRGB(sr * 0.65, sg * 0.55, sb * 0.45);
+  skyMat.uniforms.uDayness.value = dayness;
+  skyMesh.position.copy(camera.position);
 
-  const moonSpriteDist = 460;
-  moonSprite.position.set((mx / ml) * moonSpriteDist, (my / ml) * moonSpriteDist, (mz / ml) * moonSpriteDist);
-  moonSprite.material.opacity = Math.min(1, Math.max(0, moonElev * 5));
+  // Per-fragment fog colour = horizon colour so distant terrain blends
+  // smoothly into the sky. (Density is computed in shader from per-cell
+  // humidity and temperature.)
+  const fogCol = skyMat.uniforms.uHorizonColor.value;
+  terrainMat.uniforms.uFogColor.value.copy(fogCol);
+  waterMat.uniforms.uFogColor.value.copy(fogCol);
 
   // Time-of-day label for the HUD / debug.
   let label;
