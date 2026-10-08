@@ -581,7 +581,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.85;
 document.body.appendChild(renderer.domElement);
 
 const skyColor = new THREE.Color(0x8fadc9);  // legacy — no longer wired to anything; left for reference
@@ -609,7 +609,7 @@ const SHADOW_HALF = 400;
  *  frame from `updateDayNight()`. @type {THREE.DirectionalLight} */
 const sun = new THREE.DirectionalLight(0xfff0d0, 1.4);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far  = 700;
 sun.shadow.camera.left   = -SHADOW_HALF;
@@ -627,17 +627,7 @@ scene.add(sun.target);
  * casts its own shadow map so night-time terrain stays readable.
  * @type {THREE.DirectionalLight} */
 const moon = new THREE.DirectionalLight(0xb0c4ff, 0);
-moon.castShadow = true;
-moon.shadow.mapSize.set(1024, 1024);
-moon.shadow.camera.near = 1;
-moon.shadow.camera.far  = 700;
-moon.shadow.camera.left   = -SHADOW_HALF;
-moon.shadow.camera.right  =  SHADOW_HALF;
-moon.shadow.camera.top    =  SHADOW_HALF;
-moon.shadow.camera.bottom = -SHADOW_HALF;
-moon.shadow.bias = -0.0006;
-moon.shadow.normalBias = 0.05;
-moon.shadow.radius = 4;
+moon.castShadow = false;
 moon.position.set(-120, -60, 60);
 scene.add(moon);
 scene.add(moon.target);
@@ -843,7 +833,7 @@ const skyFS = `
     sky += uSunColor * sunHalo * uDayness * 0.45;
     // Sun disc — slightly larger than the moon so it reads as bright.
     float sunDisc = smoothstep(0.99965, 0.99988, sunDot);
-    sky += uSunColor * sunDisc * (0.4 + 0.6 * uDayness) * 2.5;
+    sky += uSunColor * sunDisc * (0.4 + 0.6 * uDayness) * 1.2;
 
     // Lunar halo + disc.
     float moonDot = dot(dir, uMoonDir);
@@ -995,7 +985,7 @@ export function updateDayNight(simTime) {
   if      (sunElev <  0.02) sunFactor = 0;
   else if (sunElev <  0.18) sunFactor = (sunElev - 0.02) / 0.16;
   else                      sunFactor = 1;
-  sun.intensity = 1.7 * sunFactor;
+  sun.intensity = 1.0 * sunFactor;
 
   // Sun colour: warm white at noon, deep orange near horizon.
   if (sunElev > 0.28) sun.color.setHex(0xfff0d0);
@@ -1056,9 +1046,9 @@ export function updateDayNight(simTime) {
   // and water light with the same scene lighting.
   const sunDirVec = sun.position.clone().normalize();
   const moonDirVec = moon.position.clone().normalize();
-  const ambR = ambient.color.r * ambient.intensity * 1.6;
-  const ambG = ambient.color.g * ambient.intensity * 1.6;
-  const ambB = ambient.color.b * ambient.intensity * 1.6;
+  const ambR = ambient.color.r * ambient.intensity * 1.0;
+  const ambG = ambient.color.g * ambient.intensity * 1.0;
+  const ambB = ambient.color.b * ambient.intensity * 1.0;
   terrainMat.uniforms.uLightDir.value.copy(sunDirVec);
   terrainMat.uniforms.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
   terrainMat.uniforms.uMoonDir.value.copy(moonDirVec);

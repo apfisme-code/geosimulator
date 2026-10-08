@@ -11,7 +11,8 @@ import {
   syncTextures, positionTiles, updateDayNight,
 } from './render.js';
 import { tickPlayer, player } from './player.js';
-import { renderSlice, renderGraphs, updateHUD, periodicUI } from './ui.js';
+import { renderSlice, renderGraphs, updateHUD, periodicUI, tickFPS } from './ui.js';
+import { renderFrame } from './postfx.js';
 
 // ---------- Fatal-error overlay so failures don't show up as a blank screen ----------
 const errBox = (typeof document !== 'undefined') ? document.getElementById('err') : null;
@@ -104,9 +105,10 @@ function tick(now) {
   }
 
   periodicUI(now);
+  tickFPS();
   try { updateHUD(); } catch (e) { console.error('HUD error:', e); }
 
-  renderer.render(scene, camera);
+  renderFrame();
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);

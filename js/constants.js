@@ -36,7 +36,7 @@ const DIRS = [
  */
 export const GRID = {
   L: 320, N: 128, cellSize: 320 / 128, TAU: Math.PI * 2,
-  SUBDIV: 8, NV: 128 * 8, NV1: 128 * 8 + 1,
+  SUBDIV: 4, NV: 128 * 4, NV1: 128 * 4 + 1,
   wrap, wrapRel, smoothstep, DIRS,
   TALUS: [0.35, 0.90, 1.50, 2.60],
 };

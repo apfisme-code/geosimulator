@@ -13,6 +13,30 @@ import { countActivePlates } from './plates.js';
 import { player } from './player.js';
 
 const sliceCanvas = document.getElementById('sliceCanvas');
+
+// ---------- FPS counter (rolling average over the last ~30 frames) ----------
+/** Ring of recent frame deltas in seconds. */
+const fpsBuf = new Float32Array(30);
+let fpsHead = 0;     // next slot to write
+let fpsCount = 0;    // number of valid samples
+let lastFpsTick = performance.now() / 1000;
+let fpsValue = 0;
+
+/** Call once per frame from the main loop. Records a frame delta and
+ *  updates the rolling FPS estimate. Cheap. */
+export function tickFPS() {
+  const now = performance.now() / 1000;
+  const dt = now - lastFpsTick;
+  lastFpsTick = now;
+  if (dt > 0 && dt < 1) {                 // ignore pauses and tab-switch gaps
+    fpsBuf[fpsHead] = dt;
+    fpsHead = (fpsHead + 1) % fpsBuf.length;
+    if (fpsCount < fpsBuf.length) fpsCount++;
+    let sum = 0;
+    for (let i = 0; i < fpsCount; i++) sum += fpsBuf[i];
+    fpsValue = fpsCount > 0 ? fpsCount / sum : 0;
+  }
+}
 const sliceCtx = sliceCanvas.getContext('2d');
 const graphCanvas = document.getElementById('graphCanvas');
 const graphCtx = graphCanvas.getContext('2d');
@@ -213,7 +237,7 @@ export function updateHUD() {
   hud.textContent =
     `x=${player.x.toFixed(1)}  z=${player.z.toFixed(1)}  y=${Globals.feetY.toFixed(2)}\n` +
     `t=${Globals.simTime.toFixed(1)}с  ${Globals.paused ? 'ПАУЗА' : 'идёт'}  seed=${Globals.worldSeed}\n` +
-    `время суток: ${Globals.timeOfDay}  (${(Globals.dayPhase * 100).toFixed(0)}% цикла)\n` +
+    `время суток: ${Globals.timeOfDay}  (${(Globals.dayPhase * 100).toFixed(0)}% цикла)  |  FPS: ${fpsValue.toFixed(0)}\n` +
     `биом: ${biomeAtPlayer()}  |  seaLevel=${Globals.seaLevel.toFixed(2)} м\n` +
     `плит: ${activePlates}/${MAX_PLATES}  рожд. ${Globals.birthsTotal}  смерт. ${Globals.deathsTotal}\n` +
     `плюмов: ${Globals.plumes.length}  извержений: ${Globals.eruptionsTotal}  последнее: ${lastEruptAgo}с назад${Globals.lastEruption.underwater ? ' (подводное)' : ''}\n` +
